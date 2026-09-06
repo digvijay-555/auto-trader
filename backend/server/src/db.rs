@@ -209,6 +209,7 @@ pub async fn load_config_from_db(pool: &SqlitePool) -> TradingConfig {
         pre_t1_trailing: r.pre_t1_trailing,
         pre_t1_trail_arm_pct: r.pre_t1_trail_arm_pct.clamp(0.0, 100.0),
         pre_t1_trail_factor: r.pre_t1_trail_factor.clamp(0.0, 1.0),
+        kill_switch_active: false,
     })
     .unwrap_or_else(|| TradingConfig {
         max_trade_amount_inr: 10_000.0,
@@ -226,6 +227,7 @@ pub async fn load_config_from_db(pool: &SqlitePool) -> TradingConfig {
         pre_t1_trailing: false,
         pre_t1_trail_arm_pct: 60.0,
         pre_t1_trail_factor: 0.5,
+        kill_switch_active: false,
     })
 }
 

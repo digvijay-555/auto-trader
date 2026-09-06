@@ -39,6 +39,8 @@ export interface TradingConfig {
    * stop = peak - diff * factor. 0 = tightest, 1 = loosest. Unused unless
    * `pre_t1_trailing` is on. */
   pre_t1_trail_factor: number;
+  /** When true, trading is halted for the day and open positions have been liquidated. */
+  kill_switch_active?: boolean;
 }
 
 export interface PaperTrade {

@@ -19,3 +19,5 @@ pub use auth_telegram::{
 };
 pub use health::health_handler;
 pub use auth_passkey::verify_passkey_handler;
+pub mod kill_switch;
+pub use kill_switch::{post_kill_switch_handler, post_kill_switch_reset_handler, get_kill_switch_status_handler};

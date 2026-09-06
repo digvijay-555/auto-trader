@@ -92,6 +92,8 @@ pub async fn post_settings_handler(
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
+    let current_ks = state.trading_cfg.read().await.kill_switch_active;
+    cfg.kill_switch_active = current_ks;
     *state.trading_cfg.write().await = cfg.clone();
     recompute_open_dynamic_runners(&state, &cfg).await;
 

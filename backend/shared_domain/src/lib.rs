@@ -216,6 +216,9 @@ pub struct TradingConfig {
     /// `[0, 1]` on save; unused unless `pre_t1_trailing` is on.
     #[serde(default = "default_trail_factor")]
     pub pre_t1_trail_factor: f64,
+    /// When true, halts all future trade entries and ignores new incoming signals.
+    #[serde(default)]
+    pub kill_switch_active: bool,
 }
 
 fn default_entry_mp() -> f64 { 5.0 }
@@ -696,3 +699,45 @@ pub enum DbWriteMessage {
         json: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trading_config_kill_switch_defaults_to_false() {
+        let json_str = r#"{
+            "max_trade_amount_inr": 10000.0,
+            "index_lots": 1,
+            "other_lots": 1,
+            "mode": "PAPER",
+            "brokerage_per_order": 20.0,
+            "target_1_exit_pct": 50.0,
+            "target_2_exit_pct": 100.0
+        }"#;
+
+        let cfg: TradingConfig = serde_json::from_str(json_str).expect("deserialize config");
+        assert_eq!(cfg.kill_switch_active, false);
+    }
+
+    #[test]
+    fn trading_config_kill_switch_roundtrips() {
+        let json_str = r#"{
+            "max_trade_amount_inr": 10000.0,
+            "index_lots": 1,
+            "other_lots": 1,
+            "mode": "PAPER",
+            "brokerage_per_order": 20.0,
+            "target_1_exit_pct": 50.0,
+            "target_2_exit_pct": 100.0,
+            "kill_switch_active": true
+        }"#;
+
+        let cfg: TradingConfig = serde_json::from_str(json_str).expect("deserialize config");
+        assert_eq!(cfg.kill_switch_active, true);
+
+        let serialized = serde_json::to_string(&cfg).expect("serialize config");
+        assert!(serialized.contains(r#""kill_switch_active":true"#));
+    }
+}
+

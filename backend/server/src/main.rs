@@ -22,6 +22,7 @@ use axum::{
     http::{StatusCode, header},
     middleware::{self, Next},
     response::IntoResponse,
+    Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
@@ -35,29 +36,30 @@ pub struct RateLimitEntry {
     pub window_start: std::time::Instant,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct TokenPayload {
+    sub: String,
+    iat: u64,
     exp: u64,
 }
 
-/// Resolves the secret used to sign/verify session tokens: the runtime
-/// `AUTH_SECRET` env var (an empty value counts as unset, since a blank
-/// secret would let anyone forge a valid signature), falling back to
-/// whatever was baked in at compile time. `verify_passkey_handler` (signs
-/// tokens) and `auth_middleware` (verifies them) both call this — sharing it
-/// is what guarantees they can never end up using two different secrets.
+/// Returns the authentication secret if one is configured, or `None`.
+///
+/// Looks first in the runtime environment via [`std::env::var`] (`AUTH_SECRET`),
+/// then falls back to compile-time [`option_env!`] (`AUTH_SECRET`). Empty
+/// strings are treated as unset so a misconfigured empty env var doesn't
+/// silently disable authentication.
 pub(crate) fn resolve_auth_secret() -> Option<String> {
     std::env::var("AUTH_SECRET")
         .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| option_env!("AUTH_SECRET").map(String::from))
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| option_env!("AUTH_SECRET").map(String::from).filter(|s| !s.trim().is_empty()))
 }
 
 async fn auth_middleware(
     req: Request,
     next: Next,
-) -> Result<axum::response::Response, StatusCode> {
+) -> Result<axum::response::Response, axum::response::Response> {
     let path = req.uri().path();
     
     // Allow public routes
@@ -78,52 +80,52 @@ async fn auth_middleware(
                 let token_param = query.split('&').find(|p| p.starts_with("token="));
                 match token_param {
                     Some(p) => p.trim_start_matches("token=").to_string(),
-                    None => return Err(StatusCode::UNAUTHORIZED),
+                    None => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Missing authorization token"}))).into_response()),
                 }
             } else {
-                return Err(StatusCode::UNAUTHORIZED);
+                return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Missing authorization token"}))).into_response());
             }
         }
     };
     
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Malformed token"}))).into_response());
     }
     
     let auth_secret = match resolve_auth_secret() {
         Some(s) => s,
         None => {
             tracing::error!("AUTH_SECRET not configured");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "AUTH_SECRET not configured"}))).into_response());
         }
     };
 
     let msg = format!("{}.{}", parts[0], parts[1]);
     let mut mac = match HmacSha256::new_from_slice(auth_secret.as_bytes()) {
         Ok(m) => m,
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "HMAC init failed"}))).into_response()),
     };
     mac.update(msg.as_bytes());
     let expected_sig = mac.finalize().into_bytes();
     let expected_sig_b64 = URL_SAFE_NO_PAD.encode(expected_sig);
 
     if parts[2] != expected_sig_b64 {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token signature"}))).into_response());
     }
 
     let payload_bytes = match URL_SAFE_NO_PAD.decode(parts[1]) {
         Ok(b) => b,
-        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        Err(_) => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token payload encoding"}))).into_response()),
     };
     let payload: TokenPayload = match serde_json::from_slice(&payload_bytes) {
         Ok(p) => p,
-        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        Err(_) => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token payload format"}))).into_response()),
     };
 
     let now = shared_domain::now_ist().timestamp() as u64;
     if now > payload.exp {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Token expired"}))).into_response());
     }
 
     Ok(next.run(req).await)
@@ -801,6 +803,9 @@ async fn main() {
         .route("/api/positions/reconcile/apply",    post(routes::reconcile_apply_handler))
         .route("/api/settings",                     get(routes::get_settings_handler)
                                                    .post(routes::post_settings_handler))
+        .route("/api/kill-switch",                  post(routes::post_kill_switch_handler)
+                                                   .get(routes::get_kill_switch_status_handler))
+        .route("/api/kill-switch/reset",            post(routes::post_kill_switch_reset_handler))
         .route("/api/settings/clear_database",      post(routes::post_clear_database_handler))
         .route("/api/wallet/balance",               get(routes::get_wallet_balance_handler)
                                                    .post(routes::post_wallet_balance_handler))

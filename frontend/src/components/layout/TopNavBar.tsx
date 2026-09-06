@@ -1,13 +1,17 @@
-import { Bell, User } from 'lucide-react';
+import { Bell, User, AlertOctagon } from 'lucide-react';
 import type { ScreenId } from '../../types';
 
 export function TopNavBar({
   activeScreen,
-  onNewTrade
+  onNewTrade,
+  onOpenKillSwitch,
+  killSwitchActive = false,
 }: {
   activeScreen: ScreenId;
   serverBase: string;
   onNewTrade: () => void;
+  onOpenKillSwitch?: () => void;
+  killSwitchActive?: boolean;
 }) {
   const titles: Record<ScreenId, string> = {
     dashboard: 'Trading Dashboard',
@@ -33,6 +37,22 @@ export function TopNavBar({
         </div>
       </div>
       <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        {onOpenKillSwitch && (
+          <button
+            type="button"
+            onClick={onOpenKillSwitch}
+            className={
+              killSwitchActive
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-500/30 transition-all shadow-sm flex items-center gap-1.5 animate-pulse'
+                : 'bg-red-950/40 text-red-400 border border-red-800/40 hover:bg-red-900/40 hover:border-red-600/50 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5'
+            }
+            title={killSwitchActive ? 'Kill Switch is Active (Trading Halted)' : 'Emergency Kill Switch'}
+          >
+            <AlertOctagon size={14} className={killSwitchActive ? 'text-red-400 animate-bounce' : 'text-red-400'} />
+            <span className="hidden sm:inline">{killSwitchActive ? 'Halted (Kill Switch)' : 'Kill Switch'}</span>
+            <span className="sm:hidden">{killSwitchActive ? 'Halted' : 'Kill'}</span>
+          </button>
+        )}
         <button className="hidden sm:flex w-8 h-8 rounded-full items-center justify-center text-on-surface-variant hover:bg-surface-container-high transition-colors">
           <Bell size={18} />
         </button>

@@ -10,7 +10,7 @@ import { TopNavBar } from './components/layout/TopNavBar';
 import { BottomNavBar } from './components/layout/BottomNavBar';
 
 // Components
-import { Info, Plug, SlidersHorizontal, Activity } from 'lucide-react';
+import { Info, Plug, SlidersHorizontal, Activity, AlertOctagon } from 'lucide-react';
 import { LogTerminal } from './components/LogTerminal';
 import { UpcomingTrades } from './components/UpcomingTrades';
 import { TelegramFeed } from './components/TelegramFeed';
@@ -18,6 +18,7 @@ import { PortfolioSection } from './components/PortfolioSection';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { SettingsBar } from './components/SettingsBar';
 import { HealthPage } from './components/HealthPage';
+import { KillSwitchModal } from './components/KillSwitchModal';
 
 // Screens
 import { TradeAnalyticsScreen } from './screens/TradeAnalyticsScreen';
@@ -41,13 +42,25 @@ export default function App() {
     return 'dashboard';
   });
 
+  const [killSwitchOpen, setKillSwitchOpen] = useState(false);
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
+
   useEffect(() => {
-    apiFetch(serverBase, '/api/settings')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.mode) setMode(data.mode);
-      })
-      .catch(() => {});
+    function checkStatus() {
+      apiFetch(serverBase, '/api/settings')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.mode) setMode(data.mode);
+          if (data?.kill_switch_active !== undefined) {
+            setKillSwitchActive(Boolean(data.kill_switch_active));
+          }
+        })
+        .catch(() => {});
+    }
+
+    checkStatus();
+    const timer = setInterval(checkStatus, 4000);
+    return () => clearInterval(timer);
   }, [serverBase]);
 
   function handleSelectScreen(screen: ScreenId) {
@@ -84,7 +97,27 @@ export default function App() {
           activeScreen={activeScreen}
           serverBase={serverBase}
           onNewTrade={() => handleSelectScreen('positions')}
+          onOpenKillSwitch={() => setKillSwitchOpen(true)}
+          killSwitchActive={killSwitchActive}
         />
+
+        {/* Persistent Emergency Kill Switch Banner */}
+        {killSwitchActive && (
+          <div className="bg-red-500/15 border-b border-red-500/30 px-4 py-2.5 flex items-center justify-between gap-3 text-red-400 text-xs font-semibold shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertOctagon size={16} className="text-red-400 shrink-0 animate-pulse" />
+              <span className="truncate sm:whitespace-normal">
+                EMERGENCY KILL SWITCH ENGAGED: Automated entries are halted &amp; all holdings liquidated.
+              </span>
+            </div>
+            <button
+              onClick={() => setKillSwitchOpen(true)}
+              className="px-2.5 py-1 rounded-md bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-bold text-[11px] transition-colors shrink-0"
+            >
+              Manage / Resume
+            </button>
+          </div>
+        )}
 
         {/* Dynamic Screen View */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 pb-24 md:pb-8 space-y-6 bg-surface">
@@ -205,6 +238,15 @@ export default function App() {
       <BottomNavBar
         activeScreen={activeScreen}
         onSelectScreen={handleSelectScreen}
+      />
+
+      {/* Emergency Kill Switch Modal */}
+      <KillSwitchModal
+        serverBase={serverBase}
+        isOpen={killSwitchOpen}
+        onClose={() => setKillSwitchOpen(false)}
+        onSuccess={(active) => setKillSwitchActive(active)}
+        isAlreadyActive={killSwitchActive}
       />
     </div>
   );

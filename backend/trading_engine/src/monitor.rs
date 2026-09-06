@@ -1448,7 +1448,7 @@ fn resolved_adopt_avg(user_entered: f64, broker_avg: f64) -> f64 {
 // LIVE mode — decision pass
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum LiveAction {
     /// Entry condition met — check funds, then send a market buy for `qty`.
     /// `ltp` is the price that triggered it, used to size the funds check.
@@ -1509,6 +1509,12 @@ fn decide_live(
         TradeState::Closed => None,
 
         TradeState::WaitingForEntry => {
+            if cfg.kill_switch_active {
+                return Some(LiveAction::AbandonEntry {
+                    reason: "KILL_SWITCH_ACTIVE".to_string(),
+                    loud: false,
+                });
+            }
             if let Some(reason) = pos.force_exit.clone() {
                 return Some(LiveAction::AbandonEntry { reason, loud: false });
             }
@@ -2348,6 +2354,17 @@ pub async fn start_position_monitor(
                                 }
                             }
 
+                            // Check kill switch before parsing scrips or opening any new positions
+                            if config.read().await.kill_switch_active {
+                                let msg = format!(
+                                    r#"{{"event":"KILL_SWITCH_BLOCKED","message":"Signal dropped — kill switch is active","instrument":"{}"}}"#,
+                                    signal.instrument_name
+                                );
+                                send_log(&db_tx, &log_tx, "WARN", &msg).await;
+                                tracing::warn!(instrument = %signal.instrument_name, "Signal dropped — kill switch is active");
+                                continue;
+                            }
+
                             // Lot count set to 0 for this instrument's class means
                             // "don't auto-trade it" — an index with no per-symbol
                             // override, or any stock option when `other_lots` is 0.
@@ -2626,6 +2643,14 @@ pub async fn start_position_monitor(
                     // guard below — a cancelled or rewritten signal, or the 15:29
                     // cutoff after which we do not open anything new.
                     if matches!(pos.state, TradeState::WaitingForEntry) {
+                        if cfg.kill_switch_active {
+                            pending.push(Pending {
+                                idx: i,
+                                ltp: 0.0,
+                                action: PosAction::Expire { reason: "KILL_SWITCH_ACTIVE".to_string() },
+                            });
+                            continue;
+                        }
                         if let Some(reason) = pos.force_exit.clone() {
                             pending.push(Pending { idx: i, ltp: 0.0, action: PosAction::Expire { reason } });
                             continue;
@@ -2943,6 +2968,7 @@ mod tests {
             pre_t1_trailing: false,
             pre_t1_trail_arm_pct: 60.0,
             pre_t1_trail_factor: 0.5,
+            kill_switch_active: false,
         }
     }
 
@@ -3134,5 +3160,85 @@ mod tests {
         assert_eq!(tgt1_slice_qty(75, 75, 50.0), 75);
         // The slice can never exceed what we hold.
         assert_eq!(tgt1_slice_qty(150, 75, 100.0), 150);
+    }
+
+    fn dummy_order_request() -> shared_domain::OrderRequest {
+        use shared_domain::{AmoFlag, ExchangeSegment, OrderRequest, OrderType, ProductCode, TransactionType, Validity};
+        OrderRequest {
+            after_market_order: AmoFlag::No,
+            disclosed_quantity: "0".to_string(),
+            exchange_segment: ExchangeSegment::NseFo,
+            market_protection: "0".to_string(),
+            product_code: ProductCode::Nrml,
+            portfolio_flag: "N".to_string(),
+            price: "0".to_string(),
+            order_type: OrderType::Limit,
+            quantity: "75".to_string(),
+            validity: Validity::Day,
+            trigger_price: "0".to_string(),
+            trading_symbol: "NIFTY24JUL25000CE".to_string(),
+            transaction_type: TransactionType::Buy,
+        }
+    }
+
+    #[test]
+    fn kill_switch_active_abandons_waiting_entry_in_decide_live() {
+        let mut cfg = cfg_with_lots(1, 1);
+        cfg.kill_switch_active = true;
+
+        let mut pos = position_created_at(&shared_domain::current_ist_timestamp_string());
+        pos.resolved_order = Some(dummy_order_request());
+        pos.state = TradeState::WaitingForEntry;
+
+        let ltp_map = Arc::new(DashMap::new());
+        ltp_map.insert("NIFTY".to_string(), 125.0);
+
+        let action = decide_live(&pos, &ltp_map, &cfg, false, false);
+        assert_eq!(
+            action,
+            Some(LiveAction::AbandonEntry {
+                reason: "KILL_SWITCH_ACTIVE".to_string(),
+                loud: false,
+            })
+        );
+    }
+
+    #[test]
+    fn kill_switch_inactive_allows_entry_trigger() {
+        let mut cfg = cfg_with_lots(1, 1);
+        cfg.kill_switch_active = false;
+
+        let mut pos = position_created_at(&shared_domain::current_ist_timestamp_string());
+        pos.resolved_order = Some(dummy_order_request());
+        pos.state = TradeState::WaitingForEntry;
+        pos.signal.entry_price = 120.0;
+        pos.signal.entry_condition = "ABOVE".to_string();
+
+        let ltp_map = Arc::new(DashMap::new());
+        ltp_map.insert("NIFTY".to_string(), 125.0);
+
+        let action = decide_live(&pos, &ltp_map, &cfg, false, false);
+        assert!(matches!(action, Some(LiveAction::PlaceEntry { .. })));
+    }
+
+    #[test]
+    fn kill_switch_force_exit_triggers_market_exit_on_active_position() {
+        let cfg = cfg_with_lots(1, 1);
+
+        let mut pos = active_position();
+        pos.resolved_order = Some(dummy_order_request());
+        pos.force_exit = Some("KILL_SWITCH".to_string());
+
+        let ltp_map = Arc::new(DashMap::new());
+        ltp_map.insert("NIFTY".to_string(), 130.0);
+
+        let action = decide_live(&pos, &ltp_map, &cfg, false, false);
+        assert_eq!(
+            action,
+            Some(LiveAction::ExitAll {
+                qty: 75,
+                reason: "KILL_SWITCH".to_string(),
+            })
+        );
     }
 }

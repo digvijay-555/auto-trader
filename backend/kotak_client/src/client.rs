@@ -362,13 +362,23 @@ impl KotakClient {
             .header(header::CONTENT_TYPE, "application/json")
             .json(&payload)
             .send()
-            .await?
-            .json::<LoginApiResponse>()
             .await?;
-        match resp {
-            LoginApiResponse::Success { data } => Ok(data),
-            LoginApiResponse::Error { message } => Err(KotakError::LoginTotpFailed(message)),
+        let status = resp.status();
+        let body = resp.text().await?;
+
+        if let Ok(LoginApiResponse::Success { data }) = serde_json::from_str::<LoginApiResponse>(&body) {
+            return Ok(data);
         }
+
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+            let msg = v.get("message").and_then(|m| m.as_str())
+                .or_else(|| v.get("fault").and_then(|f| f.get("message")).and_then(|m| m.as_str()))
+                .or_else(|| v.get("error").and_then(|e| e.as_str()))
+                .unwrap_or(&body);
+            return Err(KotakError::LoginTotpFailed(format!("{msg} (HTTP {status})")));
+        }
+
+        Err(KotakError::LoginTotpFailed(format!("{body} (HTTP {status})")))
     }
 
     async fn validate_mpin(
@@ -388,13 +398,23 @@ impl KotakClient {
             .header(header::CONTENT_TYPE, "application/json")
             .json(&payload)
             .send()
-            .await?
-            .json::<LoginApiResponse>()
             .await?;
-        match resp {
-            LoginApiResponse::Success { data } => Ok(data),
-            LoginApiResponse::Error { message } => Err(KotakError::LoginMpinFailed(message)),
+        let status = resp.status();
+        let body = resp.text().await?;
+
+        if let Ok(LoginApiResponse::Success { data }) = serde_json::from_str::<LoginApiResponse>(&body) {
+            return Ok(data);
         }
+
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+            let msg = v.get("message").and_then(|m| m.as_str())
+                .or_else(|| v.get("fault").and_then(|f| f.get("message")).and_then(|m| m.as_str()))
+                .or_else(|| v.get("error").and_then(|e| e.as_str()))
+                .unwrap_or(&body);
+            return Err(KotakError::LoginMpinFailed(format!("{msg} (HTTP {status})")));
+        }
+
+        Err(KotakError::LoginMpinFailed(format!("{body} (HTTP {status})")))
     }
 
     // ── Public API ──────────────────────────────────────────────────────── //
