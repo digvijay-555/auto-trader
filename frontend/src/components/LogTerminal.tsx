@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react';
 import { apiFetch, apiUrl } from '../lib/api';
 import { getToken } from '../lib/auth';
+import { useAuth } from '../context/AuthContext';
 
 export function LogTerminal({ serverBase, height = 220 }: { serverBase: string; height?: number }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [logs, setLogs] = useState<{ id: number, text: string, time: string, isError: boolean }[]>([]);
   const [filter, setFilter] = useState<'ALL' | 'ERROR'>('ALL');
   const [connected, setConnected] = useState(false);
@@ -113,9 +115,13 @@ export function LogTerminal({ serverBase, height = 220 }: { serverBase: string; 
         </button>
         <button
           onClick={async () => {
+            if (!hasWriteAccess) {
+              openUnlockModal('Clearing the database requires Write Access');
+              return;
+            }
             if (confirm('Are you sure you want to clear the entire database (logs, trades, and positions)?')) {
               try {
-                const res = await fetch(serverBase + '/api/settings/clear_database', { method: 'POST' });
+                const res = await apiFetch(serverBase, '/api/settings/clear_database', { method: 'POST' });
                 if (res.ok) setLogs([]);
                 else alert('Failed to clear database');
               } catch (e) {

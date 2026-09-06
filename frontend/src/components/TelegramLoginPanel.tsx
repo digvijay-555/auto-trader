@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { TelegramChat, TgStep } from '../types';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 export function TelegramLoginPanel({ serverBase }: { serverBase: string }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [step, setStep] = useState<TgStep>('idle');
   const [apiId, setApiId]     = useState(() => localStorage.getItem('tg_api_id') || '');
   const [apiHash, setApiHash] = useState(() => localStorage.getItem('tg_api_hash') || '');
@@ -39,6 +41,10 @@ export function TelegramLoginPanel({ serverBase }: { serverBase: string }) {
   useEffect(() => { localStorage.setItem('tg_twofa', twofa); }, [twofa]);
 
   async function post(url: string, body: object) {
+    if (!hasWriteAccess) {
+      openUnlockModal('Telegram operations require Write Access');
+      return { error: 'Write access required' };
+    }
     const res = await apiFetch(serverBase, url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -48,6 +54,10 @@ export function TelegramLoginPanel({ serverBase }: { serverBase: string }) {
   }
 
   async function requestCode() {
+    if (!hasWriteAccess) {
+      openUnlockModal('Telegram operations require Write Access');
+      return;
+    }
     setErr('');
     const data = await post('/api/auth/telegram/request-code', {
       api_id: parseInt(apiId, 10), api_hash: apiHash, phone,

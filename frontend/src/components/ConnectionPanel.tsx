@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { KotakLoginPanel } from './KotakLoginPanel';
 import { TelegramLoginPanel } from './TelegramLoginPanel';
 
@@ -15,6 +16,7 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   serverBase: string;
   onServerBaseChange: (value: string) => void;
 }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [sysStatus, setSysStatus] = useState<SysStatus>({
     telegram_connected: false,
     kotak_connected: false,
@@ -36,6 +38,10 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   }, [serverBase]);
 
   const handleDisconnectKotak = async () => {
+    if (!hasWriteAccess) {
+      openUnlockModal('Disconnecting Kotak requires Write Access');
+      return;
+    }
     if (!confirm('Disconnect Kotak? The WebSocket will stop and the session will be cleared. Your input fields will not be touched.')) return;
     try {
       await apiFetch(serverBase, '/api/auth/kotak/disconnect', { method: 'DELETE' });
@@ -43,6 +49,10 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   };
 
   const handleDisconnectTelegram = async () => {
+    if (!hasWriteAccess) {
+      openUnlockModal('Disconnecting Telegram requires Write Access');
+      return;
+    }
     if (!confirm('Disconnect Telegram? The ingester will stop and the session file will be deleted. Your input fields will not be touched.')) return;
     try {
       await apiFetch(serverBase, '/api/auth/telegram/disconnect', { method: 'DELETE' });
@@ -50,6 +60,10 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   };
 
   const handleReset = async () => {
+    if (!hasWriteAccess) {
+      openUnlockModal('Resetting connections requires Write Access');
+      return;
+    }
     if (!confirm('Are you sure you want to reset all connections? This will log out Telegram and Kotak and restart the server!')) return;
     try {
       await apiFetch(serverBase, '/api/auth/reset', { method: 'DELETE' });
@@ -61,6 +75,10 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   };
 
   const handleUpdate = async () => {
+    if (!hasWriteAccess) {
+      openUnlockModal('Updating server requires Write Access');
+      return;
+    }
     if (!confirm('Are you sure you want to update the server? This will download the latest release, disconnect everything, and restart the server.')) return;
     setIsUpdating(true);
     // The server kills itself (via tmux C-c) before it can flush the HTTP

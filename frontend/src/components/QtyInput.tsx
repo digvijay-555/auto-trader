@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 
-export function QtyInput({ initialQty, id, defaultQty, onUpdate }: {
+export function QtyInput({ initialQty, id, defaultQty, onUpdate, disabled }: {
   initialQty: number | null;
   id: string;
   defaultQty?: string;
   onUpdate: (id: string, q: number | null) => void;
+  disabled?: boolean;
 }) {
   const [val, setVal] = useState(initialQty === null ? '' : String(initialQty));
 
@@ -15,6 +16,7 @@ export function QtyInput({ initialQty, id, defaultQty, onUpdate }: {
   return (
     <input
       type="number"
+      disabled={disabled}
       value={val}
       placeholder={defaultQty ? `Auto (${defaultQty})` : "Auto"}
       onChange={e => setVal(e.target.value)}
@@ -25,7 +27,7 @@ export function QtyInput({ initialQty, id, defaultQty, onUpdate }: {
           onUpdate(id, finalVal);
         }
       }}
-      className="w-20 bg-surface-container-lowest border border-outline-variant rounded px-2.5 py-1 text-xs text-on-surface placeholder-on-surface-variant focus:outline-none focus:border-primary shadow-sm font-mono-code"
+      className={`w-20 bg-surface-container-lowest border border-outline-variant rounded px-2.5 py-1 text-xs text-on-surface placeholder-on-surface-variant focus:outline-none focus:border-primary shadow-sm font-mono-code ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
     />
   );
 }

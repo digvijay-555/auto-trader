@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertOctagon, AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 interface KillSwitchModalProps {
   serverBase: string;
@@ -17,6 +18,7 @@ export function KillSwitchModal({
   onSuccess,
   isAlreadyActive = false,
 }: KillSwitchModalProps) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
@@ -24,6 +26,10 @@ export function KillSwitchModal({
   if (!isOpen) return null;
 
   async function handleTriggerKillSwitch() {
+    if (!hasWriteAccess) {
+      openUnlockModal('Kill switch activation requires Write Access');
+      return;
+    }
     setLoading(true);
     setError(null);
     setResultMsg(null);
@@ -55,6 +61,10 @@ export function KillSwitchModal({
   }
 
   async function handleResetKillSwitch() {
+    if (!hasWriteAccess) {
+      openUnlockModal('Resetting kill switch requires Write Access');
+      return;
+    }
     setLoading(true);
     setError(null);
     setResultMsg(null);
@@ -64,7 +74,7 @@ export function KillSwitchModal({
       });
       if (!res.ok) {
         if (res.status === 401) {
-          throw new Error('Session unauthorized or expired. Please refresh the page and enter your passkey.');
+          throw new Error('Session unauthorized or expired. Please enter your passkey.');
         }
         const errData = await res.json().catch(() => null);
         throw new Error(errData?.error || `Request failed with status ${res.status}`);
@@ -107,6 +117,20 @@ export function KillSwitchModal({
             <X size={20} />
           </button>
         </div>
+
+        {/* Read-Only Mode Notice */}
+        {!hasWriteAccess && (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center justify-between">
+            <span>Write access is required to engage or reset the kill switch.</span>
+            <button
+              type="button"
+              onClick={() => openUnlockModal('Kill switch operations require Write Access')}
+              className="ml-2 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold rounded-lg transition-colors shrink-0"
+            >
+              Unlock
+            </button>
+          </div>
+        )}
 
         {/* Status / Warnings */}
         {!isAlreadyActive ? (
@@ -167,7 +191,7 @@ export function KillSwitchModal({
             <button
               type="button"
               onClick={handleTriggerKillSwitch}
-              disabled={loading}
+              disabled={loading || !hasWriteAccess}
               className="flex-1 py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-red-900/20 disabled:opacity-50"
             >
               {loading ? (
@@ -183,7 +207,7 @@ export function KillSwitchModal({
             <button
               type="button"
               onClick={handleResetKillSwitch}
-              disabled={loading}
+              disabled={loading || !hasWriteAccess}
               className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 disabled:opacity-50"
             >
               {loading ? (

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import type { ReconcileAction, ReconcileActionKind, ReconcileApplyItem, ReconcileFinding } from '../types';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 function keyOf(f: ReconcileFinding) {
   return f.position_id ?? `sym:${f.trading_symbol}`;
@@ -24,6 +25,7 @@ const EMPTY_MANUAL: ManualInputs = { stop_loss: '', target: '', avg_buy_price: '
  * Never applies anything by itself: every mismatch is a question with
  * explicit options, confirmed here before anything changes. */
 export function SyncWithKotakButton({ serverBase, onSynced }: { serverBase: string; onSynced: () => void }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [loading, setLoading] = useState(false);
   const [findings, setFindings] = useState<ReconcileFinding[] | null>(null);
   const [selections, setSelections] = useState<Record<string, ReconcileActionKind>>({});
@@ -69,6 +71,10 @@ export function SyncWithKotakButton({ serverBase, onSynced }: { serverBase: stri
 
   async function applySelections() {
     if (!findings) return;
+    if (!hasWriteAccess) {
+      openUnlockModal('Applying reconcile changes requires Write Access');
+      return;
+    }
     setError(null);
 
     const items: ReconcileApplyItem[] = [];

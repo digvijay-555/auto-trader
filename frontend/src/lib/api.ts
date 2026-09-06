@@ -34,9 +34,28 @@ export function isValidServerBase(value: string) {
 
 export function getStoredServerBase() {
   if (typeof window === 'undefined') return '';
-  const saved = window.localStorage.getItem(SERVER_BASE_STORAGE_KEY) ?? '';
+  const saved = window.localStorage.getItem(SERVER_BASE_STORAGE_KEY);
+  if (saved !== null && saved !== undefined && saved !== '') {
+    // If the user previously had the remote default saved while running on localhost,
+    // default back to local backend ("") so it connects to the local dev server.
+    if (
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+      saved === DEFAULT_SERVER_BASE
+    ) {
+      return '';
+    }
+    return normalizeServerBase(saved);
+  }
   const cookie = readCookie(SERVER_BASE_COOKIE);
-  return normalizeServerBase(saved || cookie || (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_SERVER_BASE));
+  if (cookie) return normalizeServerBase(cookie);
+  if (import.meta.env.VITE_API_BASE_URL) return normalizeServerBase(import.meta.env.VITE_API_BASE_URL);
+
+  // When running locally on localhost/127.0.0.1, default to "" so Vite's proxy forwards to local port 8080
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return '';
+  }
+
+  return normalizeServerBase(DEFAULT_SERVER_BASE);
 }
 
 export function persistServerBase(value: string) {
@@ -45,6 +64,7 @@ export function persistServerBase(value: string) {
   if (typeof window !== 'undefined') {
     if (normalized) window.localStorage.setItem(SERVER_BASE_STORAGE_KEY, normalized);
     else window.localStorage.removeItem(SERVER_BASE_STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent('at_server_base_change', { detail: { serverBase: normalized } }));
   }
 
   if (typeof document !== 'undefined') {
@@ -69,15 +89,29 @@ export function apiFetch(serverBase: string, path: string, init?: RequestInit) {
   
   return fetch(apiUrl(serverBase, path), { ...init, headers }).then(res => {
     if (res.status === 401) {
-      handleUnauthorized();
+      // 1. Passkey verification endpoint handles its own 401 (invalid passkey) — never clear session
+      // 2. Safe read methods (GET, HEAD, OPTIONS) should never revoke write access
+      // 3. Only if an active mutation that sent a token gets rejected by the server is the token invalid
+      const method = (init?.method || 'GET').toUpperCase();
+      const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+      const isPasskeyVerify = path.includes('/api/auth/verify-passkey');
+
+      if (!isPasskeyVerify && isMutation && token) {
+        handleUnauthorized(isMutation, token);
+      }
     }
     return res;
   });
 }
 
-export function handleUnauthorized() {
+export function handleUnauthorized(isMutation: boolean = false, rejectedToken?: string) {
+  // If a specific token was rejected, only clear if it matches the current stored token
+  // (prevents an older in-flight request from wiping a freshly saved token)
+  if (rejectedToken && getToken() !== rejectedToken) {
+    return;
+  }
   clearToken();
   if (typeof window !== 'undefined') {
-    window.location.reload();
+    window.dispatchEvent(new CustomEvent('at_unauthorized', { detail: { isMutation } }));
   }
 }

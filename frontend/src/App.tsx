@@ -46,6 +46,23 @@ export default function App() {
   const [killSwitchActive, setKillSwitchActive] = useState(false);
 
   useEffect(() => {
+    const handleServerBaseChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ serverBase: string }>;
+      if (typeof customEvent.detail?.serverBase === 'string') {
+        setServerBase(customEvent.detail.serverBase);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('at_server_base_change', handleServerBaseChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('at_server_base_change', handleServerBaseChange);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     function checkStatus() {
       apiFetch(serverBase, '/api/settings')
         .then((r) => r.json())

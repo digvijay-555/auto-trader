@@ -1,14 +1,16 @@
 import { useEffect, useState, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
-import { ShieldAlert, ShieldCheck, Loader2, AlertTriangle, Server, Pencil } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, Loader2, AlertTriangle, Server, Pencil, X } from 'lucide-react';
 import { apiFetch, getStoredServerBase, persistServerBase, normalizeServerBase, isValidServerBase } from '../lib/api';
 import { setToken } from '../lib/auth';
 
 interface PasskeyScreenProps {
-  onSuccess: () => void;
+  onSuccess: (token?: string) => void;
+  onClose?: () => void;
+  reason?: string | null;
 }
 
-export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
+export function PasskeyScreen({ onSuccess, onClose, reason }: PasskeyScreenProps) {
   const [passkey, setPasskey] = useState<string[]>(Array(6).fill(''));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -21,6 +23,24 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
   const [serverUnreachable, setServerUnreachable] = useState(false);
   const [editingServer, setEditingServer] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useEffect(() => {
+    const handleServerBaseChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ serverBase: string }>;
+      if (typeof customEvent.detail?.serverBase === 'string') {
+        setServerBase(customEvent.detail.serverBase);
+        setServerBaseInput(customEvent.detail.serverBase);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('at_server_base_change', handleServerBaseChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('at_server_base_change', handleServerBaseChange);
+      }
+    };
+  }, []);
 
   function commitServerBase(rawValue: string) {
     const normalized = normalizeServerBase(rawValue);
@@ -90,7 +110,7 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
       if (res.ok) {
         const data = await res.json();
         setToken(data.token);
-        onSuccess();
+        onSuccess(data.token);
       } else if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('Retry-After') || '900', 10);
         setLockoutSecs(retryAfter);
@@ -133,7 +153,18 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
 
   return (
     <div className="fixed inset-0 bg-surface/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className={`bg-surface-container-lowest border border-outline-variant rounded-3xl p-8 sm:p-12 shadow-2xl max-w-md w-full flex flex-col items-center text-center transition-transform ${shake ? 'animate-shake' : ''}`}>
+      <div className={`relative bg-surface-container-lowest border border-outline-variant rounded-3xl p-8 sm:p-12 shadow-2xl max-w-md w-full flex flex-col items-center text-center transition-transform ${shake ? 'animate-shake' : ''}`}>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute top-4 right-4 p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface transition-colors"
+          >
+            <X size={20} />
+          </button>
+        )}
+
         <div className="bg-primary/10 p-4 rounded-full mb-6">
           {lockoutSecs > 0 ? (
             <ShieldAlert size={48} className="text-error" />
@@ -142,8 +173,12 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
           )}
         </div>
         
-        <h2 className="text-2xl font-bold text-on-surface mb-2">Secure Access</h2>
-        <p className="text-on-surface-variant mb-6">Enter your 6-digit passkey to connect to the trading engine.</p>
+        <h2 className="text-2xl font-bold text-on-surface mb-2">
+          {onClose ? 'Unlock Write Access' : 'Secure Access'}
+        </h2>
+        <p className="text-on-surface-variant mb-6 text-sm">
+          {reason || (onClose ? 'Enter your 6-digit passkey to enable write operations and trade execution.' : 'Enter your 6-digit passkey to connect to the trading engine.')}
+        </p>
 
         <div className="w-full mb-6">
           {editingServer ? (
@@ -171,7 +206,13 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
               }`}
             >
               <Server size={14} className="shrink-0" />
-              <span className="truncate font-mono-code">{serverBase || 'No server configured'}</span>
+              <span className="truncate font-mono-code">
+                {serverBase ||
+                  (typeof window !== 'undefined' &&
+                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                    ? 'Local Dev Proxy (http://127.0.0.1:8080)'
+                    : 'No server configured')}
+              </span>
               <Pencil size={12} className="shrink-0 ml-auto opacity-60" />
             </button>
           )}
@@ -219,6 +260,16 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
             <Loader2 size={20} className="animate-spin" />
             <span>Verifying...</span>
           </div>
+        )}
+
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-4 text-xs text-on-surface-variant hover:text-primary transition-colors underline underline-offset-4"
+          >
+            Continue in Read-Only Mode
+          </button>
         )}
       </div>
     </div>

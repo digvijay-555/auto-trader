@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Save, Settings, LogOut, Sliders, Wallet, Layers3, Info } from 'lucide-react';
+import { Save, Settings, Sliders, Wallet, Layers3, Info, AlertTriangle, KeyRound, Lock } from 'lucide-react';
 import type { TradingConfig } from '../types';
 import { apiFetch } from '../lib/api';
-import { clearToken } from '../lib/auth';
+import { useAuth } from '../context/AuthContext';
 import { INDEX_LOT_REFERENCE } from '../lib/indexLots';
 
 const CARD = 'bg-surface-container-lowest border border-outline-variant rounded-xl p-4 sm:p-6 shadow-sm';
@@ -39,13 +39,14 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
-function FactorSlider({ label, value, min, max, step, enabled, onChange, lowLabel, highLabel, decimals, disabledNote, info }: {
+function FactorSlider({ label, value, min, max, step, enabled, disabled, onChange, lowLabel, highLabel, decimals, disabledNote, info }: {
   label: string;
   value: number;
   min: number;
   max: number;
   step: number;
   enabled: boolean;
+  disabled?: boolean;
   onChange: (v: number) => void;
   lowLabel: string;
   highLabel: string;
@@ -53,8 +54,9 @@ function FactorSlider({ label, value, min, max, step, enabled, onChange, lowLabe
   disabledNote?: string;
   info?: string;
 }) {
+  const isInteractive = enabled && !disabled;
   return (
-    <div className={`relative flex flex-col gap-1.5 sm:col-span-2 rounded-lg border border-outline-variant p-3.5 transition-opacity ${enabled ? 'bg-surface' : 'bg-surface opacity-50'}`}>
+    <div className={`relative flex flex-col gap-1.5 sm:col-span-2 rounded-lg border border-outline-variant p-3.5 transition-opacity ${isInteractive ? 'bg-surface' : 'bg-surface opacity-50'}`}>
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1 min-w-0">
           <label className={FIELD_LABEL}>{label}</label>
@@ -70,7 +72,7 @@ function FactorSlider({ label, value, min, max, step, enabled, onChange, lowLabe
         max={max}
         step={step}
         value={value}
-        disabled={!enabled}
+        disabled={!isInteractive}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full accent-primary disabled:cursor-not-allowed"
       />
@@ -88,6 +90,7 @@ function FactorSlider({ label, value, min, max, step, enabled, onChange, lowLabe
 }
 
 export function SettingsBar({ serverBase }: { serverBase: string }) {
+  const { hasWriteAccess, openUnlockModal, lock } = useAuth();
   const [cfg, setCfg] = useState<TradingConfig | null>(null);
   const [virtualBalance, setVirtualBalance] = useState<number>(0);
   const [saving, setSaving] = useState(false);
@@ -136,6 +139,10 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
 
   async function handleSave() {
     if (!cfg) return;
+    if (!hasWriteAccess) {
+      openUnlockModal('Saving settings requires Write Access');
+      return;
+    }
     setSaving(true);
     try {
       await Promise.all([
@@ -168,6 +175,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
   }
 
   function setIndexLots(symbol: string, raw: string) {
+    if (!hasWriteAccess) return;
     setCfg((c) => {
       if (!c) return c;
       const next = { ...c.index_lots_by_symbol };
@@ -185,6 +193,26 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Read-Only Mode Notice Banner */}
+      {!hasWriteAccess && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400 font-medium shadow-sm">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0 text-amber-400" />
+            <span>
+              <strong>Read-Only Mode:</strong> You are viewing live settings. Enter your passkey to modify configuration or save changes.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openUnlockModal('Enter passkey to edit trading settings')}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-lg text-xs font-bold transition-colors"
+          >
+            <KeyRound size={13} />
+            Unlock to Edit
+          </button>
+        </div>
+      )}
+
       {/* Trading mode + risk controls */}
       <div className={CARD}>
         <div className={CARD_HEADER}>
@@ -201,14 +229,21 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
               {(['PAPER', 'LIVE'] as const).map((m) => (
                 <button
                   key={m}
-                  onClick={() => setCfg((c) => c && { ...c, mode: m })}
+                  disabled={!hasWriteAccess}
+                  onClick={() => {
+                    if (!hasWriteAccess) {
+                      openUnlockModal('Changing trading mode requires Write Access');
+                      return;
+                    }
+                    setCfg((c) => c && { ...c, mode: m });
+                  }}
                   className={`flex-1 px-3 py-1.5 transition-colors font-semibold ${
                     cfg.mode === m
                       ? m === 'LIVE'
                         ? 'bg-error text-on-error font-bold'
                         : 'bg-secondary text-on-secondary font-bold'
                       : 'bg-surface text-on-surface-variant hover:bg-surface-container'
-                  }`}
+                  } ${!hasWriteAccess ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   {m}
                 </button>
@@ -225,13 +260,20 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
               {([true, false] as const).map((on) => (
                 <button
                   key={String(on)}
-                  onClick={() => setCfg((c) => c && { ...c, dynamic_targeting: on })}
+                  disabled={!hasWriteAccess}
+                  onClick={() => {
+                    if (!hasWriteAccess) {
+                      openUnlockModal('Changing dynamic targeting requires Write Access');
+                      return;
+                    }
+                    setCfg((c) => c && { ...c, dynamic_targeting: on });
+                  }}
                   title={on ? 'Sell one lot at target 1, then trail an extending target ladder for the runner' : "Exit the runner at the signal's fixed target 2 (default)"}
                   className={`flex-1 px-3 py-1.5 transition-colors font-semibold ${
                     cfg.dynamic_targeting === on
                       ? 'bg-secondary text-on-secondary font-bold'
                       : 'bg-surface text-on-surface-variant hover:bg-surface-container'
-                  }`}
+                  } ${!hasWriteAccess ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   {on ? 'ON' : 'OFF'}
                 </button>
@@ -246,6 +288,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
             max={1}
             step={0.05}
             enabled={cfg.dynamic_targeting}
+            disabled={!hasWriteAccess}
             onChange={(v) => setCfg((c) => c && { ...c, dynamic_targeting_trail_factor: v })}
             lowLabel="0.00 — tightest (locks the rung)"
             highLabel="1.00 — loosest (breakeven on rung 1)"
@@ -259,6 +302,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
             max={3}
             step={0.1}
             enabled={cfg.dynamic_targeting}
+            disabled={!hasWriteAccess}
             onChange={(v) => setCfg((c) => c && { ...c, dynamic_targeting_extension_factor: v })}
             lowLabel="0.10 — rungs packed close together"
             highLabel="3.00 — rungs spread far apart"
@@ -277,7 +321,14 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
               {([true, false] as const).map((on) => (
                 <button
                   key={String(on)}
-                  onClick={() => setCfg((c) => c && { ...c, pre_t1_trailing: on })}
+                  disabled={!hasWriteAccess}
+                  onClick={() => {
+                    if (!hasWriteAccess) {
+                      openUnlockModal('Changing pre-T1 trailing requires Write Access');
+                      return;
+                    }
+                    setCfg((c) => c && { ...c, pre_t1_trailing: on });
+                  }}
                   title={on
                     ? 'Before target 1: once price covers the arm % of the way there, trail the stop below the peak so a near-miss reversal exits in profit instead of riding back to the original SL'
                     : "Keep the signal's original SL untouched until target 1 hits (default)"}
@@ -285,7 +336,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
                     cfg.pre_t1_trailing === on
                       ? 'bg-secondary text-on-secondary font-bold'
                       : 'bg-surface text-on-surface-variant hover:bg-surface-container'
-                  }`}
+                  } ${!hasWriteAccess ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   {on ? 'ON' : 'OFF'}
                 </button>
@@ -300,6 +351,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
             max={100}
             step={5}
             enabled={cfg.pre_t1_trailing}
+            disabled={!hasWriteAccess}
             onChange={(v) => setCfg((c) => c && { ...c, pre_t1_trail_arm_pct: v })}
             lowLabel="0 — trails from entry"
             highLabel="100 — never arms before target 1"
@@ -315,6 +367,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
             max={1}
             step={0.05}
             enabled={cfg.pre_t1_trailing}
+            disabled={!hasWriteAccess}
             onChange={(v) => setCfg((c) => c && { ...c, pre_t1_trail_factor: v })}
             lowLabel="0.00 — tightest (exit on any dip)"
             highLabel="1.00 — loosest (breakeven at target 1)"
@@ -341,13 +394,14 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
                 <input
                   type="number"
                   min={0}
+                  disabled={!hasWriteAccess}
                   value={key === 'virtual_balance' ? String(virtualBalance) : String(cfg[key])}
                   onChange={(e) =>
                     key === 'virtual_balance'
                       ? setVirtualBalance(parseFloat(e.target.value) || 0)
                       : setCfg((c) => c && { ...c, [key]: parseFloat(e.target.value) || 0 })
                   }
-                  className={NUMBER_INPUT}
+                  className={`${NUMBER_INPUT} ${!hasWriteAccess ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
             ))}
@@ -383,10 +437,11 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
                 <input
                   type="number"
                   min={1}
+                  disabled={!hasWriteAccess}
                   value={configured ?? ''}
                   placeholder={cfg.index_lots > 0 ? `Auto (${cfg.index_lots})` : 'Skip (0)'}
                   onChange={(e) => setIndexLots(symbol, e.target.value)}
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded px-2 py-1 text-sm text-on-surface tabular-nums focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                  className={`w-full bg-surface-container-lowest border border-outline-variant rounded px-2 py-1 text-sm text-on-surface tabular-nums focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all ${!hasWriteAccess ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
                 <span className="text-[10px] text-on-surface-variant font-mono-code">
                   {effectiveLots > 0 ? `= ${effectiveLots * lotSize} qty` : 'skipped'}
@@ -397,7 +452,7 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
         </div>
       </div>
 
-      {/* Save / logout action bar */}
+      {/* Save / lock action bar */}
       <div className="flex items-center justify-between gap-4 bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-3 shadow-sm">
         <span className="text-xs text-on-surface-variant">
           Changes apply immediately on save — including recomputing SL &amp; next target on any open dynamic-targeting runner.
@@ -405,22 +460,34 @@ export function SettingsBar({ serverBase }: { serverBase: string }) {
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !hasWriteAccess}
+            title={!hasWriteAccess ? 'Write access required to save changes' : undefined}
             className="flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-container hover:bg-primary disabled:opacity-50 text-on-primary text-sm rounded-lg transition-colors font-body-bold shadow-sm"
           >
             <Save size={14} />
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Settings'}
           </button>
-          <button
-            onClick={() => {
-              clearToken();
-              if (typeof window !== 'undefined') window.location.reload();
-            }}
-            className="flex items-center justify-center gap-1.5 px-4 py-2 bg-error/10 hover:bg-error/20 text-error text-sm rounded-lg transition-colors font-body-bold shadow-sm"
-          >
-            <LogOut size={14} />
-            Logout
-          </button>
+          {hasWriteAccess ? (
+            <button
+              type="button"
+              onClick={lock}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-error/10 hover:bg-error/20 text-error text-sm rounded-lg transition-colors font-body-bold shadow-sm"
+              title="Lock session and switch to Read-Only mode"
+            >
+              <Lock size={14} />
+              Lock Session
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openUnlockModal('Enter passkey to unlock write access')}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm rounded-lg transition-colors font-body-bold shadow-sm"
+              title="Enter passkey to unlock write access"
+            >
+              <KeyRound size={14} />
+              Unlock
+            </button>
+          )}
         </div>
       </div>
     </div>

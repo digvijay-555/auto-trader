@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { KeyRound, Plug, Zap } from 'lucide-react';
 import type { KotakForm, KotakStatus } from '../types';
 import { apiFetch, apiUrl, getStoredServerBase, isValidServerBase, normalizeServerBase } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
   serverBase: string;
   onServerBaseChange: (value: string) => void;
 }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [form, setForm] = useState<KotakForm>(() => {
     try {
       const saved = localStorage.getItem('kotak_creds');
@@ -83,6 +85,10 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
   }, [form]);
 
   async function handleLogin() {
+    if (!hasWriteAccess) {
+      openUnlockModal('Connecting Kotak requires Write Access');
+      return;
+    }
     if (!commitServerBase(form.server_base)) return;
     setStatus('loading');
     try {
@@ -120,6 +126,10 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
   }
 
   async function handleAutoConnect() {
+    if (!hasWriteAccess) {
+      openUnlockModal('Connecting Kotak requires Write Access');
+      return;
+    }
     if (!commitServerBase(form.server_base)) return;
     setAutoStatus('loading');
     setStatus('loading');

@@ -24,23 +24,11 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 
-type HmacSha256 = Hmac<Sha256>;
 
 pub struct RateLimitEntry {
     pub attempts: u32,
     pub window_start: std::time::Instant,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TokenPayload {
-    sub: String,
-    iat: u64,
-    exp: u64,
 }
 
 /// Returns the authentication secret if one is configured, or `None`.
@@ -61,74 +49,56 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<axum::response::Response, axum::response::Response> {
     let path = req.uri().path();
-    
-    // Allow public routes
-    if path == "/api/auth/verify-passkey" || path == "/api/health" || !path.starts_with("/api/") {
+    let method = req.method();
+
+    // Allow public routes and safe read HTTP methods (read-only access):
+    // - Non-API routes (frontend static assets)
+    // - Explicit public endpoints
+    // - All safe read methods (GET, HEAD, OPTIONS)
+    if !path.starts_with("/api/")
+        || path == "/api/auth/verify-passkey"
+        || path == "/api/health"
+        || *method == axum::http::Method::GET
+        || *method == axum::http::Method::HEAD
+        || *method == axum::http::Method::OPTIONS
+    {
         return Ok(next.run(req).await);
     }
 
     let auth_header = req.headers().get(header::AUTHORIZATION)
         .and_then(|val| val.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
-        
+
     let token = match auth_header {
-        Some(t) => t.to_string(),
+        Some(t) => t,
         None => {
-            // Check query string for SSE
-            if path == "/api/logs/stream" {
-                let query = req.uri().query().unwrap_or("");
-                let token_param = query.split('&').find(|p| p.starts_with("token="));
-                match token_param {
-                    Some(p) => p.trim_start_matches("token=").to_string(),
-                    None => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Missing authorization token"}))).into_response()),
-                }
-            } else {
-                return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Missing authorization token"}))).into_response());
-            }
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "Write access requires passkey authentication"})),
+            ).into_response());
         }
     };
-    
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Malformed token"}))).into_response());
-    }
-    
+
     let auth_secret = match resolve_auth_secret() {
         Some(s) => s,
         None => {
             tracing::error!("AUTH_SECRET not configured");
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "AUTH_SECRET not configured"}))).into_response());
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "AUTH_SECRET not configured"})),
+            ).into_response());
         }
     };
 
-    let msg = format!("{}.{}", parts[0], parts[1]);
-    let mut mac = match HmacSha256::new_from_slice(auth_secret.as_bytes()) {
-        Ok(m) => m,
-        Err(_) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "HMAC init failed"}))).into_response()),
-    };
-    mac.update(msg.as_bytes());
-    let expected_sig = mac.finalize().into_bytes();
-    let expected_sig_b64 = URL_SAFE_NO_PAD.encode(expected_sig);
-
-    if parts[2] != expected_sig_b64 {
-        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token signature"}))).into_response());
+    match routes::verify_token(token, &auth_secret) {
+        Ok(_) => Ok(next.run(req).await),
+        Err(err_msg) => {
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": err_msg})),
+            ).into_response())
+        }
     }
-
-    let payload_bytes = match URL_SAFE_NO_PAD.decode(parts[1]) {
-        Ok(b) => b,
-        Err(_) => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token payload encoding"}))).into_response()),
-    };
-    let payload: TokenPayload = match serde_json::from_slice(&payload_bytes) {
-        Ok(p) => p,
-        Err(_) => return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid token payload format"}))).into_response()),
-    };
-
-    let now = shared_domain::now_ist().timestamp() as u64;
-    if now > payload.exp {
-        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Token expired"}))).into_response());
-    }
-
-    Ok(next.run(req).await)
 }
 
 // ---------------------------------------------------------------------------
@@ -826,6 +796,7 @@ async fn main() {
         .route("/api/auth/telegram/start",          post(routes::telegram_start_handler))
         .route("/api/auth/telegram/disconnect",     axum::routing::delete(routes::disconnect_telegram))
         .route("/api/auth/verify-passkey",          post(routes::verify_passkey_handler))
+        .route("/api/auth/session",                 get(routes::session_status_handler))
         .fallback_service(ServeDir::new("../frontend/dist"))
         .layer(middleware::from_fn(auth_middleware))
         .with_state(state)

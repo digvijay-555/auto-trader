@@ -1,5 +1,6 @@
-import { Bell, User, AlertOctagon } from 'lucide-react';
+import { Bell, User, AlertOctagon, ShieldCheck, Lock, Eye, KeyRound } from 'lucide-react';
 import type { ScreenId } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 export function TopNavBar({
   activeScreen,
@@ -13,12 +14,22 @@ export function TopNavBar({
   onOpenKillSwitch?: () => void;
   killSwitchActive?: boolean;
 }) {
+  const { hasWriteAccess, openUnlockModal, lock } = useAuth();
+
   const titles: Record<ScreenId, string> = {
     dashboard: 'Trading Dashboard',
     positions: 'Active Positions & Signals',
     analytics: 'Trade Analytics & Order Flow Deep Dive',
     portfolio: 'Portfolio Performance & Reports',
     settings: 'Configurations & System Settings',
+  };
+
+  const handleExecuteClick = () => {
+    if (!hasWriteAccess) {
+      openUnlockModal('Order execution requires Write Access');
+      return;
+    }
+    onNewTrade();
   };
 
   return (
@@ -36,7 +47,36 @@ export function TopNavBar({
           <span className="cursor-pointer hover:text-primary transition-colors">Alerts</span>
         </div>
       </div>
-      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Role-based status pill */}
+        {hasWriteAccess ? (
+          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-full text-xs font-semibold">
+            <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+            <span className="hidden sm:inline">Write Access</span>
+            <button
+              type="button"
+              onClick={lock}
+              title="Lock session (switch to Read-Only mode)"
+              className="ml-1 text-emerald-400/70 hover:text-emerald-300 p-0.5 rounded transition-colors"
+            >
+              <Lock size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => openUnlockModal('Enter passkey to enable write operations and order execution')}
+            title="Click to unlock write access with passkey"
+            className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors"
+          >
+            <Eye size={13} className="text-amber-400 shrink-0" />
+            <span>Read-Only</span>
+            <span className="text-amber-400/50 font-normal">|</span>
+            <KeyRound size={12} className="shrink-0" />
+            <span className="underline decoration-dotted hidden sm:inline">Unlock</span>
+          </button>
+        )}
+
         {onOpenKillSwitch && (
           <button
             type="button"
@@ -60,7 +100,7 @@ export function TopNavBar({
           <User size={18} />
         </button>
         <button
-          onClick={onNewTrade}
+          onClick={handleExecuteClick}
           className="bg-primary text-on-primary px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1"
         >
           <span className="sm:hidden">+ Trade</span>

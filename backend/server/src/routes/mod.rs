@@ -18,6 +18,6 @@ pub use auth_telegram::{
     telegram_chats_handler, telegram_start_handler, disconnect_telegram,
 };
 pub use health::health_handler;
-pub use auth_passkey::verify_passkey_handler;
+pub use auth_passkey::{verify_passkey_handler, session_status_handler, verify_token};
 pub mod kill_switch;
 pub use kill_switch::{post_kill_switch_handler, post_kill_switch_reset_handler, get_kill_switch_status_handler};

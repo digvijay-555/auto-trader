@@ -3,6 +3,7 @@ import { Info } from 'lucide-react';
 import type { MonitoredPosition } from '../types';
 import { apiFetch } from '../lib/api';
 import { fmt } from '../lib/format';
+import { useAuth } from '../context/AuthContext';
 import { QtyInput } from './QtyInput';
 import { SyncWithKotakButton } from './SyncWithKotakButton';
 
@@ -30,6 +31,7 @@ function stateLabel(p: MonitoredPosition): string {
 }
 
 export function UpcomingTrades({ serverBase }: { serverBase: string }) {
+  const { hasWriteAccess, openUnlockModal } = useAuth();
   const [positions, setPositions] = useState<MonitoredPosition[]>([]);
   const [openTooltip, setOpenTooltip] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
@@ -49,6 +51,10 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
   }, [load]);
 
   async function cancelTrade(id: string) {
+    if (!hasWriteAccess) {
+      openUnlockModal('Cancelling upcoming orders requires Write Access');
+      return;
+    }
     try {
       const res = await apiFetch(serverBase, `/api/positions/${id}`, { method: 'DELETE' });
       if (!res.ok) {
@@ -65,6 +71,10 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
   }
 
   async function updateQty(id: string, qty: number | null) {
+    if (!hasWriteAccess) {
+      openUnlockModal('Overriding order quantity requires Write Access');
+      return;
+    }
     try {
       await apiFetch(serverBase, `/api/positions/${id}`, {
         method: 'PATCH',
@@ -78,6 +88,10 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
   }
 
   async function closeOngoingTrade(id: string) {
+    if (!hasWriteAccess) {
+      openUnlockModal('Closing positions requires Write Access');
+      return;
+    }
     try {
       setClosingId(id);
       const res = await apiFetch(serverBase, `/api/positions/${id}/close`, { method: 'POST' });
@@ -98,6 +112,10 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
   }
 
   async function sellQty(id: string, held: number) {
+    if (!hasWriteAccess) {
+      openUnlockModal('Selling position quantity requires Write Access');
+      return;
+    }
     const input = window.prompt(`Quantity to sell at market (of ${held} held):`, String(held));
     if (input === null) return;
     const qty = parseInt(input, 10);
@@ -205,7 +223,7 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
                     </td>
                     <td className="px-3 py-2.5 text-error font-mono-code font-semibold">₹{fmt(p.signal.stop_loss)}</td>
                     <td className="px-3 py-2.5">
-                      <QtyInput initialQty={p.override_qty} id={p.id} defaultQty={p.resolved_order?.quantity} onUpdate={updateQty} />
+                      <QtyInput initialQty={p.override_qty} id={p.id} defaultQty={p.resolved_order?.quantity} onUpdate={updateQty} disabled={!hasWriteAccess} />
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <button onClick={() => cancelTrade(p.id)} className="px-2.5 py-1 bg-error-container hover:bg-error text-on-error-container hover:text-on-error rounded text-xs transition-colors font-medium">
@@ -249,7 +267,7 @@ export function UpcomingTrades({ serverBase }: { serverBase: string }) {
 
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <div className="text-xs font-semibold text-on-surface-variant">Qty:</div>
-                  <QtyInput initialQty={p.override_qty} id={p.id} defaultQty={p.resolved_order?.quantity} onUpdate={updateQty} />
+                  <QtyInput initialQty={p.override_qty} id={p.id} defaultQty={p.resolved_order?.quantity} onUpdate={updateQty} disabled={!hasWriteAccess} />
                 </div>
 
                 <div className="pt-1">
