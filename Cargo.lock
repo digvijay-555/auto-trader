@@ -2311,6 +2311,7 @@ dependencies = [
  "base64",
  "chrono",
  "dashmap",
+ "dotenvy",
  "futures",
  "hmac 0.12.1",
  "kotak_client",

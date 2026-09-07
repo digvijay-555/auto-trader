@@ -115,7 +115,7 @@ export function LogTerminal({ serverBase, height = 220 }: { serverBase: string; 
           onClick={async () => {
             if (confirm('Are you sure you want to clear the entire database (logs, trades, and positions)?')) {
               try {
-                const res = await fetch(serverBase + '/api/settings/clear_database', { method: 'POST' });
+                const res = await apiFetch(serverBase, '/api/settings/clear_database', { method: 'POST' });
                 if (res.ok) setLogs([]);
                 else alert('Failed to clear database');
               } catch (e) {

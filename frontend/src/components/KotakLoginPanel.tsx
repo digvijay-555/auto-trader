@@ -59,7 +59,6 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
 
   useEffect(() => {
     async function checkState() {
-      if (!serverBase) return;
       try {
         const res = await apiFetch(serverBase, '/api/auth/kotak');
         if (res.ok) {

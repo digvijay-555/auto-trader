@@ -22,3 +22,7 @@ backend/server/server-latest
 # copy cannot slip into a commit.
 docs/javascript-snippets.md
 docs/typescript-snippets.md
+
+# Private keys / credentials
+*.pem
+auto-trader-key.pem
