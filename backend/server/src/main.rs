@@ -44,12 +44,22 @@ async fn auth_middleware(
     req: Request,
     next: Next,
 ) -> Result<axum::response::Response, StatusCode> {
+    if req.method() == axum::http::Method::OPTIONS {
+        tracing::debug!(
+            path = %req.uri().path(),
+            origin = ?req.headers().get("origin"),
+            "OPTIONS preflight passed through auth_middleware"
+        );
+        return Ok(next.run(req).await);
+    }
+
     let path = req.uri().path();
     
     // Allow public routes
     if path == "/api/auth/verify-passkey" || path == "/api/health" || !path.starts_with("/api/") {
         return Ok(next.run(req).await);
     }
+
 
     let auth_header = req.headers().get(header::AUTHORIZATION)
         .and_then(|val| val.to_str().ok())
@@ -160,6 +170,8 @@ pub(crate) struct AppState {
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
+
     // 1. Tracing — timestamps in IST (UTC+5:30) so GCP server logs are readable
     let ist_timer = tracing_subscriber::fmt::time::OffsetTime::new(
         time::UtcOffset::from_hms(5, 30, 0).expect("valid IST offset"),
@@ -555,7 +567,19 @@ async fn main() {
         .route("/api/auth/telegram/chats",          get(routes::telegram_chats_handler))
         .route("/api/auth/telegram/start",          post(routes::telegram_start_handler))
         .route("/api/auth/telegram/disconnect",     axum::routing::delete(routes::disconnect_telegram))
-        .route("/api/auth/verify-passkey",          post(routes::verify_passkey_handler))
+        .route(
+            "/api/auth/verify-passkey",
+            post(routes::verify_passkey_handler).options(|| async {
+                (
+                    axum::http::StatusCode::NO_CONTENT,
+                    [
+                        ("access-control-allow-origin", "*"),
+                        ("access-control-allow-methods", "POST, OPTIONS"),
+                        ("access-control-allow-headers", "content-type, authorization"),
+                    ],
+                )
+            }),
+        )
         .route("/api/strategy",                     get(routes::strategy_state_handler))
         .route("/api/strategy/decisions",           get(routes::strategy_decisions_handler))
         .route("/api/strategy/config",              get(routes::get_strategy_config_handler)

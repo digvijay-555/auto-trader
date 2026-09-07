@@ -11,7 +11,6 @@ export function ConnectionPanel({ serverBase, onServerBaseChange }: {
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    if (!serverBase) return;
     const fetchStatus = async () => {
       try {
         const res = await apiFetch(serverBase, '/api/status');

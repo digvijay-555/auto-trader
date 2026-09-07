@@ -35,9 +35,20 @@ struct TokenPayload {
 pub async fn verify_passkey_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<PasskeyReq>,
 ) -> impl IntoResponse {
     let ip = addr.ip().to_string();
+    let origin = headers
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+
+    tracing::info!(
+        ip = %ip,
+        origin = %origin,
+        "Passkey verification request received"
+    );
 
     // 1. Rate-limit check (5 attempts / 15 minutes)
     let window_duration = std::time::Duration::from_secs(15 * 60);
@@ -50,10 +61,13 @@ pub async fn verify_passkey_handler(
             current_attempts = 1;
         } else {
             if entry.attempts >= 5 {
-                tracing::warn!(ip = %ip, "Rate limit exceeded for passkey login");
+                tracing::warn!(ip = %ip, origin = %origin, "Rate limit exceeded for passkey login");
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
-                    [("Retry-After", "900")],
+                    [
+                        ("access-control-allow-origin", "*"),
+                        ("Retry-After", "900"),
+                    ],
                     Json(serde_json::json!({"error": "Too many attempts. Try again later."})),
                 )
                     .into_response();
@@ -72,10 +86,23 @@ pub async fn verify_passkey_handler(
         current_attempts = 1;
     }
 
-    // 2. Verify passkey (support both runtime and compile-time env vars)
-    let env_passkey = std::env::var("PASSKEY")
-        .or_else(|_| option_env!("PASSKEY").map(String::from).ok_or("not set"))
-        .expect("PASSKEY must be set");
+    // 2. Verify passkey (support runtime env or compile-time env)
+    let env_passkey = match std::env::var("PASSKEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| option_env!("PASSKEY").map(String::from))
+    {
+        Some(k) => k,
+        None => {
+            tracing::error!(ip = %ip, origin = %origin, "PASSKEY not configured on server");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("access-control-allow-origin", "*")],
+                Json(serde_json::json!({"error": "PASSKEY not configured on server"})),
+            )
+                .into_response();
+        }
+    };
     
     // Constant-time comparison (check length first to prevent panic)
     let is_valid: bool = if req.passkey.len() == env_passkey.len() {
@@ -83,6 +110,7 @@ pub async fn verify_passkey_handler(
     } else {
         tracing::warn!(
             ip = %ip,
+            origin = %origin,
             req_len = req.passkey.len(),
             env_len = env_passkey.len(),
             "Passkey length mismatch"
@@ -91,9 +119,15 @@ pub async fn verify_passkey_handler(
     };
 
     if !is_valid {
-        tracing::warn!(ip = %ip, attempts = current_attempts, "Invalid passkey attempt");
+        tracing::warn!(
+            ip = %ip,
+            origin = %origin,
+            attempts = current_attempts,
+            "Invalid passkey attempt"
+        );
         return (
             StatusCode::UNAUTHORIZED,
+            [("access-control-allow-origin", "*")],
             Json(serde_json::json!({"error": "Invalid passkey"})),
         )
             .into_response();
@@ -103,9 +137,23 @@ pub async fn verify_passkey_handler(
     state.rate_limit_map.remove(&ip);
 
     // 3. Issue Token
-    let auth_secret = std::env::var("AUTH_SECRET")
-        .or_else(|_| option_env!("AUTH_SECRET").map(String::from).ok_or("not set"))
-        .expect("AUTH_SECRET must be set");
+    let auth_secret = match std::env::var("AUTH_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| option_env!("AUTH_SECRET").map(String::from))
+    {
+        Some(s) => s,
+        None => {
+            tracing::error!(ip = %ip, origin = %origin, "AUTH_SECRET not configured on server");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("access-control-allow-origin", "*")],
+                Json(serde_json::json!({"error": "AUTH_SECRET not configured on server"})),
+            )
+                .into_response();
+        }
+    };
+
     let now = shared_domain::now_ist().timestamp() as u64;
     let exp = now + 7 * 24 * 60 * 60; // 7 days
 
@@ -130,9 +178,10 @@ pub async fn verify_passkey_handler(
 
     let token = format!("{}.{}", msg, sig_b64);
 
-    tracing::info!(ip = %ip, "Successful passkey login");
+    tracing::info!(ip = %ip, origin = %origin, "Successful passkey login");
     (
         StatusCode::OK,
+        [("access-control-allow-origin", "*")],
         Json(serde_json::json!({ "token": token })),
     ).into_response()
 }

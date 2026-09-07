@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 import { ShieldAlert, ShieldCheck, Loader2 } from 'lucide-react';
-import { apiFetch, getStoredServerBase } from '../lib/api';
+import { apiFetch, getStoredServerBase, headersToObject } from '../lib/api';
 import { setToken } from '../lib/auth';
 
 interface PasskeyScreenProps {
@@ -48,31 +48,53 @@ export function PasskeyScreen({ onSuccess }: PasskeyScreenProps) {
 
   const verifyPasskey = async (code: string) => {
     setLoading(true);
+    setError('');
+    const serverBase = getStoredServerBase();
+    console.group('[Passkey Verification]');
+    console.log('Window Origin:', typeof window !== 'undefined' ? window.location.origin : '');
+    console.log('Server Base:', serverBase ? serverBase : '(same-origin / relative)');
+    console.log('Passkey Entered:', '•'.repeat(code.length), `(${code.length} digits)`);
+
     try {
-      const serverBase = getStoredServerBase();
       const res = await apiFetch(serverBase, '/api/auth/verify-passkey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ passkey: code }),
       });
 
+      console.log('Verify Passkey Response:', {
+        status: res.status,
+        statusText: res.statusText,
+        ok: res.ok,
+        headers: headersToObject(res.headers),
+      });
+
       if (res.ok) {
         const data = await res.json();
+        console.log('Passkey verification SUCCESS: Received JWT token.');
+        console.groupEnd();
         setToken(data.token);
         onSuccess();
       } else if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('Retry-After') || '900', 10);
+        console.warn(`[Passkey] Rate limited (429). Retry-After: ${retryAfter}s`);
+        console.groupEnd();
         setLockoutSecs(retryAfter);
         setError('Too many attempts. Locked out.');
         triggerShake();
         startLockoutTimer(retryAfter);
       } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn('[Passkey] Verification failed with status ' + res.status + ':', errJson);
+        console.groupEnd();
         setError('Invalid passkey');
         setPasskey(Array(6).fill(''));
         inputRefs.current[0]?.focus();
         triggerShake();
       }
     } catch (err) {
+      console.error('[Passkey] Network / CORS error during passkey verification:', err);
+      console.groupEnd();
       setError('Connection error');
       triggerShake();
     } finally {
