@@ -399,8 +399,8 @@ async fn main() {
                     }
                 }
 
-                let client_guard = kotak_arc.lock().await;
-                if let Some(ref client) = *client_guard {
+                let client_opt = { kotak_arc.lock().await.clone() };
+                if let Some(client) = client_opt {
                     tracing::info!("Daily Scrip Master refresh starting...");
                     let _ = log_tx_scrip.send(
                         r#"{"event":"SCRIP_FETCH","message":"Daily 09:10 Scrip Master refresh..."}"#.into(),

@@ -98,8 +98,8 @@ pub async fn portfolio_handler(
     let mode = state.trading_cfg.read().await.mode.clone();
 
     let (balance, balance_source) = if mode == "LIVE" {
-        let guard = state.kotak.lock().await;
-        match guard.as_ref() {
+        let client_opt = { state.kotak.lock().await.clone() };
+        match client_opt {
             Some(client) => match client.get_limits().await {
                 Ok(limits) => (limits.net, "LIVE".to_string()),
                 Err(e) => {

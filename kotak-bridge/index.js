@@ -19,7 +19,22 @@ global.HSD_Flag = false;
 global.HSID_Flag = false;
 
 // Load the library
-const hslibCode = fs.readFileSync('../kotak-api-docs/Websocket/hslib.js', 'utf8');
+const candidatePaths = [
+    './hslib.js',
+    '../kotak-api-docs/Websocket/hslib.js',
+    '../../kotak-api-docs/Websocket/hslib.js',
+    '../Websocket/hslib.js',
+];
+let hslibCode = null;
+for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+        hslibCode = fs.readFileSync(p, 'utf8');
+        break;
+    }
+}
+if (!hslibCode) {
+    throw new Error('hslib.js not found in candidate paths: ' + candidatePaths.join(', '));
+}
 eval(hslibCode);
 
 let wsClient = null;

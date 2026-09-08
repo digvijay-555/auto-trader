@@ -251,8 +251,10 @@ fn build_market_order(
 type KotakHandle = Arc<tokio::sync::Mutex<Option<KotakClient>>>;
 
 async fn kotak_place(kotak: &KotakHandle, order: &shared_domain::OrderRequest) -> Result<String, String> {
-    let guard = kotak.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "no Kotak session".to_string())?;
+    let client = {
+        let guard = kotak.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "no Kotak session".to_string())?
+    };
     client
         .place_live_order(order)
         .await
@@ -261,14 +263,18 @@ async fn kotak_place(kotak: &KotakHandle, order: &shared_domain::OrderRequest) -
 }
 
 async fn kotak_limits(kotak: &KotakHandle) -> Result<kotak_client::KotakLimits, String> {
-    let guard = kotak.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "no Kotak session".to_string())?;
+    let client = {
+        let guard = kotak.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "no Kotak session".to_string())?
+    };
     client.get_limits().await.map_err(|e| e.to_string())
 }
 
 async fn kotak_cancel(kotak: &KotakHandle, order_no: &str, trading_symbol: &str) -> Result<(), String> {
-    let guard = kotak.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "no Kotak session".to_string())?;
+    let client = {
+        let guard = kotak.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| "no Kotak session".to_string())?
+    };
     let ts = (!trading_symbol.is_empty()).then_some(trading_symbol);
     client.cancel_order(order_no, ts).await.map(|_| ()).map_err(|e| e.to_string())
 }
@@ -450,13 +456,14 @@ async fn reconcile_live_orders(
         return false;
     }
 
-    let book = {
+    let client = {
         let g = kotak.lock().await;
-        match g.as_ref() {
-            Some(c) => c.get_order_book().await,
+        match g.as_ref().cloned() {
+            Some(c) => c,
             None => return false,
         }
     };
+    let book = client.get_order_book().await;
     let book = match book {
         Ok(b) => b,
         Err(e) => {
@@ -694,14 +701,15 @@ async fn reconcile_on_startup(
     let nothing_to_protect = tracked.is_empty();
 
     // 2. Broker truth.
-    let (broker_positions, book) = {
+    let client = {
         let guard = kotak.lock().await;
-        let Some(client) = guard.as_ref() else {
+        let Some(client) = guard.as_ref().cloned() else {
             tracing::warn!("LIVE startup reconciliation skipped — no Kotak session");
             return false;
         };
-        (client.get_positions().await, client.get_order_book().await)
+        client
     };
+    let (broker_positions, book) = (client.get_positions().await, client.get_order_book().await);
     let mut positions_verified = true;
     let broker_positions = match broker_positions {
         Ok(v) => v,
@@ -950,9 +958,9 @@ pub async fn preview_reconciliation(
     };
 
     let broker_positions = {
-        let guard = kotak.lock().await;
-        let Some(client) = guard.as_ref() else {
-            return Err("no Kotak session".to_string());
+        let client = {
+            let guard = kotak.lock().await;
+            guard.as_ref().cloned().ok_or_else(|| "no Kotak session".to_string())?
         };
         client.get_positions().await.map_err(|e| e.to_string())?
     };
@@ -1102,9 +1110,9 @@ pub async fn apply_reconciliation(
 
     let needs_broker_truth = items.iter().any(|i| i.action == ReconcileAction::AdoptQty);
     let broker_positions = if needs_broker_truth {
-        let guard = kotak.lock().await;
-        let Some(client) = guard.as_ref() else {
-            return Err("no Kotak session".to_string());
+        let client = {
+            let guard = kotak.lock().await;
+            guard.as_ref().cloned().ok_or_else(|| "no Kotak session".to_string())?
         };
         Some(client.get_positions().await.map_err(|e| e.to_string())?)
     } else {
@@ -1418,8 +1426,8 @@ async fn exec_exit_all(
     if let Some(sl_id) = &ctx.sl_order_id {
         if let Err(e) = kotak_cancel(kotak, sl_id, &ctx.trading_symbol).await {
             let still_open = {
-                let guard = kotak.lock().await;
-                match guard.as_ref() {
+                let client_opt = { kotak.lock().await.clone() };
+                match client_opt {
                     Some(client) => client
                         .get_order_book()
                         .await

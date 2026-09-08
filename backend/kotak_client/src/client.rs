@@ -313,7 +313,11 @@ pub struct KotakClient {
 impl KotakClient {
     /// Construct a new client using the static API Dashboard access token.
     pub fn new(access_token: impl Into<String>) -> Result<Self, KotakError> {
-        let http = Client::builder().use_rustls_tls().build()?;
+        let http = Client::builder()
+            .use_rustls_tls()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
         Ok(Self {
             http,
             access_token: access_token.into(),
