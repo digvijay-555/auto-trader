@@ -15,9 +15,11 @@ export function readCookie(name: string) {
 }
 
 export function normalizeServerBase(value: string) {
-  const trimmed = value.trim();
+  let trimmed = value.trim();
   if (!trimmed) return '';
-  return trimmed.replace(/\/+$/, '');
+  trimmed = trimmed.replace(/\/+$/, '');
+  trimmed = trimmed.replace(/\/api$/, '');
+  return trimmed;
 }
 
 export function isValidServerBase(value: string) {
@@ -49,11 +51,11 @@ export function getStoredServerBase() {
     base = '';
   }
 
-  // If base matches the current window.location.origin, normalize to '' so requests are same-origin
+  // If base matches the current window.location origin or host, normalize to '' so requests are same-origin
   if (base) {
     try {
       const parsed = new URL(base);
-      if (parsed.origin === window.location.origin) {
+      if (parsed.origin === window.location.origin || parsed.host === window.location.host) {
         base = '';
       }
     } catch (_) {}
@@ -94,7 +96,12 @@ export function persistServerBase(value: string) {
 export function apiUrl(serverBase: string, path: string) {
   const normalized = normalizeServerBase(serverBase);
   if (normalized && !isValidServerBase(normalized)) return path;
-  return normalized ? `${normalized}${path}` : path;
+  if (!normalized) return path;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (normalized.endsWith('/api') && cleanPath.startsWith('/api/')) {
+    return `${normalized}${cleanPath.slice(4)}`;
+  }
+  return `${normalized}${cleanPath}`;
 }
 
 export function headersToObject(headers: Headers): Record<string, string> {

@@ -186,6 +186,11 @@ impl StrategyEngine {
             .collect()
     }
 
+    /// Clear subscribed set so new WebSocket connections re-subscribe all needed feeds.
+    pub fn reset_subscribed(&mut self) {
+        self.subscribed.clear();
+    }
+
     /// Run the full pipeline for one index.
     ///
     /// This is pure with respect to the order path: it never places an order and
@@ -240,7 +245,9 @@ impl StrategyEngine {
         let debate = DebateCoordinator::deliberate(vec![technical, flow, regime_view], &self.cfg);
 
         // ── Regime gate. Even a won debate does not trade into a bad regime. //
-        if !reading.regime.allows_entry() {
+        let regime_allowed = reading.regime.allows_entry()
+            || (self.cfg.allow_rangebound_entry && matches!(reading.regime, MarketRegime::Rangebound));
+        if !regime_allowed {
             return stop(
                 reading.clone(),
                 debate,
@@ -660,5 +667,21 @@ mod tests {
         assert_eq!(round_tick(120.19, 0.05), 120.15);
         // Degenerate tick sizes pass through rather than dividing by zero.
         assert_eq!(round_tick(120.13, 0.0), 120.13);
+    }
+
+    #[test]
+    fn allow_rangebound_entry_permits_rangebound_regime() {
+        let regime = MarketRegime::Rangebound;
+        assert!(!regime.allows_entry(), "Rangebound does not allow entry by default");
+
+        let cfg_default = StrategyConfig { allow_rangebound_entry: false, ..Default::default() };
+        let allowed_default = regime.allows_entry()
+            || (cfg_default.allow_rangebound_entry && matches!(regime, MarketRegime::Rangebound));
+        assert!(!allowed_default);
+
+        let cfg_allowed = StrategyConfig { allow_rangebound_entry: true, ..Default::default() };
+        let allowed_custom = regime.allows_entry()
+            || (cfg_allowed.allow_rangebound_entry && matches!(regime, MarketRegime::Rangebound));
+        assert!(allowed_custom, "allow_rangebound_entry must permit entry under Rangebound regime");
     }
 }

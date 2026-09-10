@@ -140,11 +140,33 @@ pub async fn start_market_data_stream(
                             if let Some(arr) = parsed["data"].as_array() {
                                 let now_ms = chrono::Utc::now().timestamp_millis();
                                 for item in arr {
-                                    if let (Some(tk), Some(e)) = (item["tk"].as_str(), item["e"].as_str()) {
-                                        let key = format!("{}|{}", e.to_ascii_lowercase(), tk.trim());
-                                        // LTP map first, byte-for-byte the original
-                                        // behaviour — the live path depends on it.
-                                        if let Some(ltp) = item["ltp"].as_f64().or_else(|| item["ltp"].as_str().and_then(|s| s.parse::<f64>().ok())) {
+                                    let (tk, e) = match (item["tk"].as_str(), item["e"].as_str()) {
+                                        (Some(tk), Some(e)) => (Some(tk.trim().to_string()), Some(e.to_ascii_lowercase())),
+                                        _ => {
+                                            if let Some(name) = item["name"].as_str() {
+                                                let parts: Vec<&str> = name.split('|').collect();
+                                                if parts.len() >= 3 {
+                                                    (Some(parts[2..].join("|")), Some(parts[1].to_ascii_lowercase()))
+                                                } else if parts.len() == 2 {
+                                                    (Some(parts[1].to_string()), Some(parts[0].to_ascii_lowercase()))
+                                                } else {
+                                                    (None, None)
+                                                }
+                                            } else {
+                                                (None, None)
+                                            }
+                                        }
+                                    };
+
+                                    if let (Some(tk), Some(e)) = (tk, e) {
+                                        let key = format!("{}|{}", e, tk);
+                                        // LTP map first, checking both "ltp" and "iv" (Index Value)
+                                        if let Some(ltp) = item["ltp"]
+                                            .as_f64()
+                                            .or_else(|| item["iv"].as_f64())
+                                            .or_else(|| item["ltp"].as_str().and_then(|s| s.parse::<f64>().ok()))
+                                            .or_else(|| item["iv"].as_str().and_then(|s| s.parse::<f64>().ok()))
+                                        {
                                             prices_clone.insert(key.clone(), ltp);
                                         }
                                         // Then accumulate the full frame for the

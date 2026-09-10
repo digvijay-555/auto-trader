@@ -216,18 +216,21 @@ async fn main() {
     tokio::spawn(db::db_writer(write_rx, pool.clone()));
 
     // 6. Telegram ingester (optional — requires TELEGRAM_API_ID env var)
-    if let Ok(raw_id) = std::env::var("TELEGRAM_API_ID") {
-        let api_id: i32 = raw_id.parse().expect("TELEGRAM_API_ID must be i32");
-        let api_hash    = std::env::var("TELEGRAM_API_HASH")
-            .expect("TELEGRAM_API_HASH required when TELEGRAM_API_ID is set");
-        let chat_ids: Vec<i64> = std::env::var("TELEGRAM_CHAT_IDS")
-            .unwrap_or_default()
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        tokio::spawn(telegram_ingester::start_ingester_loop(
-            api_id, api_hash, chat_ids, signal_tx.clone(), Some(log_tx.clone()),
-        ));
+    let telegram_id_str = std::env::var("TELEGRAM_API_ID").unwrap_or_default();
+    if let Ok(api_id) = telegram_id_str.trim().parse::<i32>() {
+        let api_hash = std::env::var("TELEGRAM_API_HASH").unwrap_or_default();
+        if !api_hash.trim().is_empty() {
+            let chat_ids: Vec<i64> = std::env::var("TELEGRAM_CHAT_IDS")
+                .unwrap_or_default()
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+            tokio::spawn(telegram_ingester::start_ingester_loop(
+                api_id, api_hash, chat_ids, signal_tx.clone(), Some(log_tx.clone()),
+            ));
+        } else {
+            tracing::warn!("TELEGRAM_API_ID is set but TELEGRAM_API_HASH is empty — ingester disabled");
+        }
     } else {
         tracing::info!("TELEGRAM_API_ID not set — ingester disabled (use /api/auth/telegram)");
     }
@@ -236,7 +239,7 @@ async fn main() {
     let ws_task = Arc::new(tokio::sync::Mutex::new(None));
     let ws_tx = Arc::new(tokio::sync::Mutex::new(None));
     
-    let ws_scrips = std::env::var("KOTAK_SCRIPS").unwrap_or_else(|_| "nse_cm|11536".into());
+    let ws_scrips = std::env::var("KOTAK_SCRIPS").unwrap_or_else(|_| "nse_cm|11536&nse_cm|Nifty 50&nse_cm|Nifty Bank".into());
     let scrip_store = Arc::new(RwLock::new(None));
     let raw_scrip_csv = Arc::new(RwLock::new(None));
 

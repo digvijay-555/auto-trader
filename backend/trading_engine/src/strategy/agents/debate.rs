@@ -292,4 +292,38 @@ mod tests {
         assert!(!o.actionable);
         assert!(o.summary.contains("Flow"), "the log should say who stayed silent: {}", o.summary);
     }
+
+    #[test]
+    fn two_active_agents_agreeing_without_orderflow_is_actionable() {
+        // When OrderFlowAnalyst has weight 0.0 due to lack of feed data,
+        // Tech + Regime agreeing on a trend clears consensus without phantom dilution.
+        let o = DebateCoordinator::deliberate(
+            vec![
+                view("Tech", Stance::Bullish, 85.0, 1.4),
+                view("Flow", Stance::Neutral, 0.0, 0.0),
+                view("Regime", Stance::Bullish, 75.0, 1.2),
+            ],
+            &cfg(),
+        );
+        assert!(o.actionable, "{}", o.summary);
+        assert_eq!(o.stance, Stance::Bullish);
+        assert!(o.conviction >= 75.0, "got {}", o.conviction);
+    }
+
+    #[test]
+    fn tech_alone_cannot_trade_when_regime_abstains_even_if_flow_has_zero_weight() {
+        // If RegimeAnalyst examined data and chose Neutral (weight 1.2),
+        // Tech alone cannot reach conviction threshold.
+        let default_cfg = StrategyConfig::default(); // conviction_threshold: 60.0
+        let o = DebateCoordinator::deliberate(
+            vec![
+                view("Tech", Stance::Bullish, 85.0, 1.4),
+                view("Flow", Stance::Neutral, 0.0, 0.0),
+                view("Regime", Stance::Neutral, 0.0, 1.2),
+            ],
+            &default_cfg,
+        );
+        assert!(!o.actionable, "Tech alone must not trade without regime confirmation: {}", o.summary);
+        assert!(o.conviction < default_cfg.conviction_threshold, "conviction was {}", o.conviction);
+    }
 }

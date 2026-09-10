@@ -149,10 +149,13 @@ impl OrderFlowAnalyst {
         }
 
         if readings == 0 {
+            // Feeds without volume, depth, or chain data must not dilute the debate
+            // denominator with phantom weight. Weight is set to 0.0 so active agents
+            // with real data determine consensus.
             return AgentView::neutral(
                 "OrderFlowAnalyst",
-                WEIGHT,
-                "no order-flow data available on any reading — abstaining",
+                0.0,
+                "no order-flow data available on this feed — abstaining (weight 0.0)",
             );
         }
 
@@ -234,6 +237,7 @@ mod tests {
         let v = OrderFlowAnalyst::analyse(&bars, None, ChainOi::default(), &cfg());
         assert_eq!(v.stance, Stance::Neutral);
         assert_eq!(v.confidence, 0.0, "no data must mean no confidence, not a confident zero");
+        assert_eq!(v.weight, 0.0, "absent feed data must have 0 weight to not dilute consensus");
         assert!(v.evidence[0].contains("abstaining"), "got {:?}", v.evidence);
     }
 

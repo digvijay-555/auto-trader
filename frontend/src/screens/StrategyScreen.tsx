@@ -13,6 +13,7 @@ import {
   TrendingDown,
   TrendingUp,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import type {
@@ -323,6 +324,24 @@ export function StrategyScreen({ serverBase }: { serverBase: string }) {
     }
   }
 
+  async function toggleRangebound(next: boolean) {
+    if (!snap) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(serverBase, '/api/strategy/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...snap.config, allow_rangebound_entry: next }),
+      });
+      if (!res.ok) setError(await res.text());
+      else load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-on-surface-variant gap-2">
@@ -341,8 +360,14 @@ export function StrategyScreen({ serverBase }: { serverBase: string }) {
   }
 
   const halted = snap.risk.halted_reason !== null;
-  // The warm-up gate reads closed bars, so surface the weakest series.
-  const minBars = snap.warmup.length > 0 ? Math.min(...snap.warmup.map(([, n]) => n)) : 0;
+  // The warm-up gate reads closed bars for the configured underlying indices.
+  const indexSpotKeys = snap.config.indices.map((i) => i.spot_key);
+  const minBars =
+    indexSpotKeys.length > 0
+      ? Math.min(...indexSpotKeys.map((k) => snap.warmup.find(([feedKey]) => feedKey === k)?.[1] ?? 0))
+      : snap.warmup.length > 0
+      ? Math.min(...snap.warmup.map(([, n]) => n))
+      : 0;
   const warmupPct = Math.min(100, (minBars / Math.max(1, snap.config.min_bars_for_signal)) * 100);
 
   return (
@@ -374,6 +399,19 @@ export function StrategyScreen({ serverBase }: { serverBase: string }) {
             >
               {snap.enabled ? <Pause size={13} /> : <Play size={13} />}
               {snap.enabled ? 'Disable' : 'Enable'}
+            </button>
+            <button
+              onClick={() => toggleRangebound(!snap.config.allow_rangebound_entry)}
+              disabled={busy}
+              title="Allow trade entries during Rangebound market regime (for paper-trade simulation in flat markets)"
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
+                snap.config.allow_rangebound_entry
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30'
+                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+              }`}
+            >
+              <Zap size={13} className={snap.config.allow_rangebound_entry ? 'text-amber-400' : ''} />
+              {snap.config.allow_rangebound_entry ? 'Rangebound: Allowed' : 'Rangebound: Blocked'}
             </button>
             <button
               onClick={() => haltOrResume(halted ? 'resume' : 'halt')}
@@ -472,6 +510,16 @@ export function StrategyScreen({ serverBase }: { serverBase: string }) {
           </div>
           <div className="h-2 rounded-full bg-surface-container-high overflow-hidden">
             <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${warmupPct}%` }} />
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {snap.config.indices.map((idx) => {
+              const bars = snap.warmup.find(([k]) => k === idx.spot_key)?.[1] ?? 0;
+              return (
+                <span key={idx.symbol} className="text-[11px] font-mono px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
+                  {idx.symbol}: <strong className={bars >= snap.config.min_bars_for_signal ? 'text-emerald-400' : 'text-primary'}>{bars}</strong>/{snap.config.min_bars_for_signal} bars
+                </span>
+              );
+            })}
           </div>
           <p className="text-[11px] text-on-surface-variant mt-2">
             No signal is generated until every series is warm. Bars persist across restarts, so this only runs

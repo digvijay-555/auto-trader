@@ -206,12 +206,16 @@ async fn subscribe(
     if keys.is_empty() {
         return;
     }
+    let guard = ws_tx.lock().await;
+    let Some(tx) = guard.as_ref() else {
+        // WebSocket not connected yet; do NOT mark keys as subscribed!
+        return;
+    };
+
     let fresh = { engine.write().await.newly_subscribed(keys) };
     if fresh.is_empty() {
         return;
     }
-    let guard = ws_tx.lock().await;
-    let Some(tx) = guard.as_ref() else { return };
     for key in fresh {
         prices.entry(key.clone()).or_insert(0.0);
         let _ = tx.send(serde_json::json!({"action": "subscribe", "scrips": key}).to_string());
