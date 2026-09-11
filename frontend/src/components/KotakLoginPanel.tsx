@@ -11,9 +11,11 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
     try {
       const saved = localStorage.getItem('kotak_creds');
       if (saved) {
+        const parsed = JSON.parse(saved);
+        delete parsed.server_base;
         return {
+          ...parsed,
           server_base: getStoredServerBase(),
-          ...JSON.parse(saved),
           totp: '',
         } as KotakForm;
       }
@@ -34,8 +36,10 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
     const normalized = normalizeServerBase(rawValue);
     if (!normalized) {
       onServerBaseChange('');
-      setMsg('');
-      if (status !== 'loading') setStatus('idle');
+      if (status === 'error' && msg === 'Enter a full http:// or https:// server URL') {
+        setMsg('');
+        setStatus('idle');
+      }
       return true;
     }
 
@@ -81,12 +85,17 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
   async function handleLogin() {
     if (!commitServerBase(form.server_base)) return;
     setStatus('loading');
+    setMsg('');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await apiFetch(form.server_base, '/api/auth/kotak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       // Try to parse the JSON body regardless of status so we can surface
       // the server's own error message when available.
       let data: { error?: string; status?: string } = {};
@@ -99,12 +108,13 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
         setStatus('error');
         setMsg(data.error ?? `Server returned ${res.status} — check credentials`);
       }
-    } catch (e) {
+    } catch (e: any) {
+      clearTimeout(timeoutId);
       setStatus('error');
-      // `fetch` throws a TypeError("Failed to fetch") when there is no HTTP
-      // response at all (network down, proxy timeout, CORS preflight blocked,
-      // SSL error, etc.).  The raw error string is opaque to end-users, so
-      // replace it with something actionable.
+      if (e?.name === 'AbortError') {
+        setMsg('Connection timed out (20s) — verify Server URL');
+        return;
+      }
       const isNetworkError =
         e instanceof TypeError && /failed to fetch|network/i.test(e.message);
       setMsg(
@@ -116,7 +126,7 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
   }
 
   const fields: { key: keyof typeof form; label: string; type?: string }[] = [
-    { key: 'server_base',   label: 'Server URL or IP:PORT' },
+    { key: 'server_base',   label: 'Server URL (leave empty)' },
     { key: 'access_token',  label: 'API Access Token' },
     { key: 'mobile_number', label: 'Mobile (+91…)' },
     { key: 'ucc',           label: 'UCC (Client Code)' },
@@ -150,9 +160,9 @@ export function KotakLoginPanel({ serverBase, onServerBaseChange }: {
           {status === 'loading' ? 'Connecting…' : status === 'ok' ? 'Connected' : 'Connect'}
         </button>
         {msg && (
-          <span className={`text-xs self-center ${status === 'ok' ? 'text-secondary font-medium' : 'text-error font-medium'}`}>
+          <div className={`w-full text-xs font-medium pt-1 ${status === 'ok' ? 'text-secondary' : 'text-error'}`}>
             {msg}
-          </span>
+          </div>
         )}
         {status === 'ok' && (
           <div className="flex gap-2 ml-auto">

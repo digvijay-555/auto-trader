@@ -52,15 +52,27 @@ pub async fn kotak_login_handler(
         ).into_response(),
     };
 
+    let raw_mobile = req.mobile_number.trim();
+    let mobile_number = if raw_mobile.starts_with('+') {
+        raw_mobile.to_string()
+    } else if raw_mobile.len() == 10 {
+        format!("+91{raw_mobile}")
+    } else if !raw_mobile.is_empty() {
+        format!("+{raw_mobile}")
+    } else {
+        raw_mobile.to_string()
+    };
+
     let creds = kotak_client::KotakCredentials {
-        access_token: req.access_token.clone(),
-        mobile_number: req.mobile_number,
-        ucc: req.ucc,
-        totp: req.totp,
-        mpin: req.mpin,
+        access_token: req.access_token.trim().to_string(),
+        mobile_number,
+        ucc: req.ucc.trim().to_string(),
+        totp: req.totp.trim().to_string(),
+        mpin: req.mpin.trim().to_string(),
     };
 
     if let Err(e) = client.login(creds).await {
+        tracing::error!("Kotak login failed: {e}");
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response();
     }
 
@@ -78,8 +90,11 @@ pub async fn kotak_login_handler(
 
     // (Re)start the HSM WebSocket with fresh tokens.
     if let Some((auth, sid)) = client.session_credentials() {
-        let scrips = std::env::var("KOTAK_SCRIPS").unwrap_or_else(|_| "nse_cm|11536".into());
+        let scrips = std::env::var("KOTAK_SCRIPS").unwrap_or_else(|_| "nse_cm|11536&nse_cm|Nifty 50&nse_cm|Nifty Bank".into());
         
+        // Reset strategy engine's subscribed set so it re-subscribes all spot feeds on the new connection
+        state.strategy.engine.write().await.reset_subscribed();
+
         // Abort the previous WebSocket task to prevent dual connections
         let mut ws_guard = state.ws_task.lock().await;
         if let Some(old_task) = ws_guard.take() {

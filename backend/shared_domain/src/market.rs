@@ -114,7 +114,7 @@ impl MarketTick {
             };
         }
 
-        set_num!(ltp, "ltp");
+        set_num!(ltp, "ltp", "iv");
         set_num!(last_traded_qty, "ltq");
         set_num!(bid, "bp");
         set_num!(ask, "sp");
@@ -122,10 +122,10 @@ impl MarketTick {
         set_num!(ask_qty, "bs");
         set_num!(total_buy_qty, "tbq");
         set_num!(total_sell_qty, "tsq");
-        set_num!(open, "op");
-        set_num!(high, "h");
-        set_num!(low, "lo");
-        set_num!(prev_close, "c");
+        set_num!(open, "op", "openingPrice");
+        set_num!(high, "h", "highPrice");
+        set_num!(low, "lo", "lowPrice");
+        set_num!(prev_close, "c", "ic");
         set_num!(avg_traded_price, "ap");
         // Cumulative volume appears as `v` on scrip feeds; some frames use `vol`.
         set_num!(volume, "v", "vol");
@@ -271,5 +271,25 @@ mod tests {
         t.merge_from(&json!({"ltp": 1.0}), 10_000);
         assert!(!t.is_stale(12_000, 5_000));
         assert!(t.is_stale(16_000, 5_000));
+    }
+
+    #[test]
+    fn index_tick_fields_merge_correctly() {
+        let mut t = MarketTick::new("nse_cm|Nifty 50");
+        t.merge_from(
+            &json!({
+                "iv": "24850.25",
+                "ic": "24800.10",
+                "openingPrice": "24810.00",
+                "highPrice": "24890.00",
+                "lowPrice": "24780.00"
+            }),
+            1_000,
+        );
+        assert_eq!(t.ltp, Some(24850.25));
+        assert_eq!(t.prev_close, Some(24800.10));
+        assert_eq!(t.open, Some(24810.00));
+        assert_eq!(t.high, Some(24890.00));
+        assert_eq!(t.low, Some(24780.00));
     }
 }

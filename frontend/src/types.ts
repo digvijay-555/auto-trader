@@ -283,6 +283,7 @@ export interface IndexSpec {
 
 export interface StrategyConfig {
   enabled: boolean;
+  allow_rangebound_entry?: boolean;
   indices: IndexSpec[];
   min_bars_for_signal: number;
   series_capacity: number;

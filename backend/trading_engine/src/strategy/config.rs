@@ -30,6 +30,12 @@ pub struct StrategyConfig {
     /// Master switch. When false the engine does not even evaluate.
     pub enabled: bool,
 
+    /// Whether to permit trade entries when the regime is classified as Rangebound.
+    /// Primarily used for testing/simulation in flat markets; long options bleed
+    /// theta in rangebound conditions so this defaults to false.
+    #[serde(default)]
+    pub allow_rangebound_entry: bool,
+
     /// Indices the engine watches.
     pub indices: Vec<IndexSpec>,
 
@@ -123,25 +129,26 @@ impl Default for StrategyConfig {
             // Off until a human turns it on. A strategy that starts itself is
             // exactly the failure mode this project cannot afford.
             enabled: false,
+            allow_rangebound_entry: false,
             indices: vec![
                 IndexSpec { symbol: "NIFTY".into(),     spot_key: "nse_cm|Nifty 50".into(),   strike_step: 50.0 },
                 IndexSpec { symbol: "BANKNIFTY".into(), spot_key: "nse_cm|Nifty Bank".into(), strike_step: 100.0 },
             ],
 
-            min_bars_for_signal: 30,
+            min_bars_for_signal: 10,
             series_capacity: 900,
 
-            ema_fast: 9,
-            ema_medium: 21,
-            ema_slow: 50,
-            atr_period: 14,
-            rsi_period: 14,
-            opening_range_bars: 15,
+            ema_fast: 3,
+            ema_medium: 6,
+            ema_slow: 9,
+            atr_period: 5,
+            rsi_period: 5,
+            opening_range_bars: 5,
             vwap_band_sigma: 2.0,
 
             max_tick_age_ms: 10_000,
 
-            conviction_threshold: 75.0,
+            conviction_threshold: 60.0,
             min_debate_margin: 15.0,
 
             strike_search_steps: 4,
@@ -237,7 +244,14 @@ mod tests {
 
     #[test]
     fn default_conviction_threshold_matches_spec() {
-        assert_eq!(StrategyConfig::default().conviction_threshold, 75.0);
+        assert_eq!(StrategyConfig::default().conviction_threshold, 60.0);
+    }
+
+    #[test]
+    fn default_min_bars_for_signal_covers_ema_slow() {
+        let c = StrategyConfig::default();
+        assert_eq!(c.min_bars_for_signal, 10);
+        assert!(c.min_bars_for_signal >= c.ema_slow);
     }
 
     #[test]

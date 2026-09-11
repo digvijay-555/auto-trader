@@ -19,7 +19,22 @@ global.HSD_Flag = false;
 global.HSID_Flag = false;
 
 // Load the library
-const hslibCode = fs.readFileSync('../kotak-api-docs/Websocket/hslib.js', 'utf8');
+const candidatePaths = [
+    './hslib.js',
+    '../kotak-api-docs/Websocket/hslib.js',
+    '../../kotak-api-docs/Websocket/hslib.js',
+    '../Websocket/hslib.js',
+];
+let hslibCode = null;
+for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+        hslibCode = fs.readFileSync(p, 'utf8');
+        break;
+    }
+}
+if (!hslibCode) {
+    throw new Error('hslib.js not found in candidate paths: ' + candidatePaths.join(', '));
+}
 eval(hslibCode);
 
 let wsClient = null;
@@ -88,21 +103,14 @@ function handleMessage(msg) {
 
             // Initially subscribe if scrips are provided
             if (msg.scrips) {
-                let formattedScrips = String(msg.scrips).replace(/,/g, '&');
-                let subObj = {
-                    "type": "mws",
-                    "scrips": formattedScrips,
-                    "channelnum": 1
-                };
-                wsClient.send(JSON.stringify(subObj));
+                sendSubscriptions(msg.scrips, wsClient, msg.type);
             }
 
             // Drain any subscribe messages that arrived before open
             if (pendingSubscriptions.length > 0) {
                 console.error(`Draining ${pendingSubscriptions.length} queued subscription(s)`);
-                for (const scrips of pendingSubscriptions) {
-                    let formattedScrips = String(scrips).replace(/,/g, '&');
-                    wsClient.send(JSON.stringify({ type: "mws", scrips: formattedScrips, channelnum: 1 }));
+                for (const pending of pendingSubscriptions) {
+                    sendSubscriptions(pending.scrips, wsClient, pending.type);
                 }
                 pendingSubscriptions = [];
             }
@@ -138,26 +146,28 @@ function handleMessage(msg) {
             } else {
                 parsed = data;
             }
+
+            if (Array.isArray(parsed)) {
+                for (const item of parsed) {
+                    normalizeTick(item);
+                }
+            } else if (parsed && typeof parsed === 'object') {
+                normalizeTick(parsed);
+            }
+
             console.log(JSON.stringify({ event: "data", data: parsed }));
         };
     } else if (msg.action === 'subscribe') {
         if (wsClient) {
-            let formattedScrips = msg.scrips ? String(msg.scrips).replace(/,/g, '&') : "";
-            let subObj = {
-                "type": "mws",
-                "scrips": formattedScrips,
-                "channelnum": 1
-            };
             if (wsOpen) {
-                // Connection is live — send immediately
                 try {
-                    wsClient.send(JSON.stringify(subObj));
+                    sendSubscriptions(msg.scrips, wsClient, msg.type);
                 } catch (e) {
                     console.log(JSON.stringify({ event: "error", message: `subscribe failed: ${e.message}` }));
                 }
             } else {
                 // Connection not open yet — queue for drain in onopen
-                pendingSubscriptions.push(formattedScrips);
+                pendingSubscriptions.push({ scrips: msg.scrips, type: msg.type });
             }
         }
     } else if (msg.action === 'close') {
@@ -165,5 +175,89 @@ function handleMessage(msg) {
             wsClient.close();
         }
         process.exit(0);
+    }
+}
+
+function isIndexScrip(scrip) {
+    const parts = String(scrip).trim().split('|');
+    const tokenOrName = parts.length > 1 ? parts[1].trim() : parts[0].trim();
+    return !/^\d+$/.test(tokenOrName);
+}
+
+function sendSubscriptions(scripsStr, ws, explicitType) {
+    if (!scripsStr || !ws) return;
+    const scrips = String(scripsStr).split(/[,&]/).map(s => s.trim()).filter(Boolean);
+    if (scrips.length === 0) return;
+
+    if (explicitType) {
+        const formatted = scrips.join('&');
+        ws.send(JSON.stringify({ type: explicitType, scrips: formatted, channelnum: 1 }));
+        return;
+    }
+
+    const indexScrips = [];
+    const marketScrips = [];
+
+    for (const s of scrips) {
+        if (isIndexScrip(s)) {
+            indexScrips.push(s);
+        } else {
+            marketScrips.push(s);
+        }
+    }
+
+    if (marketScrips.length > 0) {
+        const subObj = {
+            "type": "mws",
+            "scrips": marketScrips.join('&'),
+            "channelnum": 1
+        };
+        try {
+            ws.send(JSON.stringify(subObj));
+        } catch (e) {
+            console.error(`Failed to send mws subscription: ${e.message}`);
+        }
+    }
+
+    if (indexScrips.length > 0) {
+        const subObj = {
+            "type": "ifs",
+            "scrips": indexScrips.join('&'),
+            "channelnum": 1
+        };
+        try {
+            ws.send(JSON.stringify(subObj));
+        } catch (e) {
+            console.error(`Failed to send ifs subscription: ${e.message}`);
+        }
+    }
+}
+
+function normalizeTick(item) {
+    if (!item || typeof item !== 'object') return;
+    if (item.iv !== undefined && item.ltp === undefined) {
+        item.ltp = item.iv;
+    }
+    if (item.ic !== undefined && item.c === undefined) {
+        item.c = item.ic;
+    }
+    if (item.openingPrice !== undefined && item.op === undefined) {
+        item.op = item.openingPrice;
+    }
+    if (item.highPrice !== undefined && item.h === undefined) {
+        item.h = item.highPrice;
+    }
+    if (item.lowPrice !== undefined && item.lo === undefined) {
+        item.lo = item.lowPrice;
+    }
+    if ((!item.tk || !item.e) && item.name) {
+        const parts = item.name.split('|');
+        if (parts.length >= 3) {
+            if (!item.e) item.e = parts[1];
+            if (!item.tk) item.tk = parts.slice(2).join('|');
+        } else if (parts.length === 2) {
+            if (!item.e) item.e = parts[0];
+            if (!item.tk) item.tk = parts[1];
+        }
     }
 }
